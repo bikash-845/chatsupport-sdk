@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chat SDK — keyless admin panel</title>
+    <!-- Empty data: icon. Without it every load logs a 404 for /favicon.ico,
+         which is pure noise on a page whose job is surfacing real errors. -->
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>Keyless admin panel</h1>
+      <p class="subtitle">
+        <code>createConversationClient</code> — the staff surface. No publishable key is sent, and
+        <strong>that absence is the signal</strong> that selects chat-service's staff flow.
+      </p>
+    </header>
+
+    <!--
+      Filled in at boot by server/serve.mjs when it is running the bundled stub.
+      Absent in every other case; the panel checks and stays quiet.
+    -->
+    <div id="stub-banner" class="banner banner-stub" hidden></div>
+
+    <div class="layout">
+      <section class="panel" aria-labelledby="conn-h">
+        <h2 id="conn-h">Connection</h2>
+
+        <form id="connect-form" autocomplete="off">
+          <label for="wsUrl">WebSocket URL</label>
+          <input id="wsUrl" name="wsUrl" type="text" spellcheck="false"
+                 placeholder="ws://127.0.0.1:3000/chat-services/v2/ws" required />
+          <p class="hint">
+            Full URL, never derived from the REST origin. Use <code>127.0.0.1</code>, not
+            <code>localhost</code> — an IPv6 <code>::1</code> listener wins name resolution on macOS
+            and you get a 60-second hang instead of a refusal.
+          </p>
+
+          <label for="apiUrl">REST origin</label>
+          <input id="apiUrl" name="apiUrl" type="text" spellcheck="false"
+                 placeholder="http://127.0.0.1:3000" required />
+          <p class="hint">Origin only. <code>/chat-services/api/v1</code> is appended for you.</p>
+
+          <label for="token">dh-auth <code>id_token</code></label>
+          <textarea id="token" name="token" rows="3" spellcheck="false"
+                    placeholder="eyJhbGciOi… (roleId 1 / 5 / 6 / 66)" required></textarea>
+          <p class="hint">
+            Pasted at runtime and held in memory only. It is never written to
+            <code>localStorage</code>, never sent anywhere but the REST origin and the WebSocket URL
+            above, and never logged.
+            <strong>A publishable or secret key does not belong in this field</strong> — this surface
+            has neither.
+          </p>
+
+          <label for="senderId">Your staff participant id</label>
+          <input id="senderId" name="senderId" type="text" spellcheck="false"
+                 placeholder="agent_7" required />
+          <p class="hint">
+            <code>localSender</code>. A local-echo hint only — the server derives the real sender
+            from the token — but required, because a session carries both a customer and an agent and
+            nothing else tells the SDK which one this browser is.
+          </p>
+
+          <div class="row">
+            <button id="connect" type="submit">Connect</button>
+            <button id="disconnect" type="button" disabled>Disconnect</button>
+            <button id="retry" type="button" disabled>Retry now</button>
+          </div>
+        </form>
+
+        <dl class="facts">
+          <dt>Connection state</dt><dd id="state" class="state-idle">idle</dd>
+          <dt>Publishable key</dt><dd><em>absent (this is the staff flow)</em></dd>
+        </dl>
+
+        <div id="error" class="banner banner-error" hidden></div>
+      </section>
+
+      <section class="panel" aria-labelledby="conv-h">
+        <h2 id="conv-h">Conversation</h2>
+
+        <label for="sessionId">Session id</label>
+        <div class="row">
+          <input id="sessionId" type="text" spellcheck="false" placeholder="session_abc" />
+          <button id="open" type="button" disabled>Open</button>
+        </div>
+        <p class="hint">
+          Don't have one? <button id="find" type="button" class="link" disabled>List my queue</button>
+          — <code>GET /agent/queue</code>, scoped server-side from your verified role.
+        </p>
+        <div id="queue" class="queue" hidden></div>
+
+        <dl class="facts">
+          <dt>Status</dt><dd id="sess-status">—</dd>
+          <dt>Mode</dt><dd id="sess-mode">—</dd>
+          <dt>Page one loaded</dt><dd id="sess-loaded">—</dd>
+          <dt>Messages</dt><dd id="sess-count">0</dd>
+        </dl>
+
+        <ol id="messages" class="messages" aria-live="polite"></ol>
+
+        <form id="compose-form" autocomplete="off">
+          <div class="row">
+            <input id="compose" type="text" placeholder="Message…" disabled />
+            <button id="send" type="submit" disabled>Send</button>
+          </div>
+        </form>
+      </section>
+    </div>
+
+    <section class="panel log-panel" aria-labelledby="log-h">
+      <h2 id="log-h">Event log <span class="hint">— everything the SDK's <code>logger</code> seam emitted, plus this page's own steps</span></h2>
+      <ol id="log" class="log"></ol>
+    </section>
+
+    <script>
+      // Substituted by server/serve.mjs. Nothing secret is ever put here — the
+      // token is a runtime field, not config.
+      window.__PANEL_CONFIG__ = /*__PANEL_CONFIG__*/ null;
+    </script>
+    <script src="/app.js"></script>
+  </body>
+</html>

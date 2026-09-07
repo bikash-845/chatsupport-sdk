@@ -1,0 +1,22 @@
+{
+  "name": "@dhaam-ccrm/admin-panel-example",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Keyless (staff) reference panel \u2014 consumes @dhaam-ccrm/core's createConversationClient exactly as an admin console would.",
+  "type": "module",
+  "scripts": {
+    "start": "node server/serve.mjs",
+    "start:stub": "node server/serve.mjs --stub",
+    "smoke": "node server/smoke.mjs",
+    "build": "node server/serve.mjs --build-only",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dhaam-ccrm/core": "workspace:*",
+    "@dhaam-ccrm/rest": "workspace:*"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.7",
+    "typescript": "^5.3.0"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+
+    // Points at the workspace build of @dhaam-ccrm/core — the SAME file the
+    // package's own `exports.types` names, so this mapping is not a shortcut
+    // past the public surface; it is the public surface, reachable before
+    // `pnpm install` has linked `node_modules/@dhaam-ccrm/core`. Delete it and
+    // nothing changes once the workspace is installed.
+    "baseUrl": ".",
+    "paths": {
+      "@dhaam-ccrm/core": ["../../packages/core/dist/index.d.ts"],
+      "@dhaam-ccrm/rest": ["../../packages/rest/dist/index.d.ts"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules"]
+}
