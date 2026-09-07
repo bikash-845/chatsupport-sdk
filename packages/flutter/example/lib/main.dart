@@ -30,7 +30,8 @@ library;
 
 import 'dart:async';
 
-import 'package:dhaam_chat/dhaam_chat.dart' show ChatClient, ErrorPayload;
+import 'package:dhaam_chat/dhaam_chat.dart'
+    show ChatClient, ErrorCode, ErrorPayload;
 import 'package:dhaam_chat_flutter/dhaam_chat_flutter.dart'
     show
         ChatClientAdapter,
@@ -50,6 +51,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'example_config.dart';
 import 'rest_session_actions.dart';
 import 'seams.dart';
+import 'token_shape.dart';
 
 void main() {
   // Resolved once, before the tree exists. It is pure and synchronous, so
@@ -552,14 +554,8 @@ class _ChatPanelPageState extends State<_ChatPanelPage> {
                   child: Padding(
                     padding: const EdgeInsets.all(8),
                     child: Text(
-                      gaveUp
-                          // Naming the reason separately matters: an exhausted
-                          // auth cap and a refused protocol version are both
-                          // terminal and want different fixes.
-                          ? 'GAVE UP (${state.suspendReason!.name}) — '
-                              '${error.code.name}: ${error.message}'
-                          : '${error.code.name}: ${error.message}'
-                              '${error.retryable ? " (retrying)" : ""}',
+                      _errorLine(state, error, gaveUp: gaveUp),
+                      maxLines: 12,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 12,
@@ -575,6 +571,38 @@ class _ChatPanelPageState extends State<_ChatPanelPage> {
       ],
     );
   }
+}
+
+/// What the diagnostics strip says.
+///
+/// An `AUTH_INVALID` on its own is a dead end for whoever is integrating: the
+/// token is present, unexpired and obviously a JWT, and the server will not
+/// say more than "Authentication failed" — correctly, since a chattier auth
+/// failure is an oracle. So where the token's SHAPE explains it, this says so
+/// instead of repeating the server.
+String _errorLine(
+  ChatWidgetState state,
+  ErrorPayload error, {
+  required bool gaveUp,
+}) {
+  final String head = gaveUp
+      // Naming the reason separately matters: an exhausted auth cap and a
+      // refused protocol version are both terminal and want different fixes.
+      ? 'GAVE UP (${state.suspendReason!.name}) — '
+          '${error.code.name}: ${error.message}'
+      : '${error.code.name}: ${error.message}'
+          '${error.retryable ? " (retrying)" : ""}';
+
+  if (error.code != ErrorCode.authInvalid &&
+      error.code != ErrorCode.authExpired) {
+    return head;
+  }
+  // `ExampleConfig` is a sealed pair; only the ready half carries a token, and
+  // the incomplete half never reaches a live connection to fail one.
+  final ExampleConfig config = readExampleConfig();
+  if (config is! ExampleConfigReady) return head;
+  final String? hint = describeSuspiciousToken(config.accessToken);
+  return hint == null ? head : '$head\n\n$hint';
 }
 
 // ─────────────────────────────────────────────────────────────────────────

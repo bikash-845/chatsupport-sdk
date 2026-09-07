@@ -72,6 +72,34 @@ nullable on one class rather than wrapped in a second `Partial<T>`-shaped type.
 
 ---
 
+
+### The access token is minted by YOUR backend, not by an identity provider
+
+This is the single most common way to get a working setup that will not
+connect. `DHAAM_ACCESS_TOKEN` is **not** a Cognito/Auth0/Firebase token, and
+not your app's own session JWT. The chat service issues its own short-lived,
+scoped token:
+
+```
+POST /chat-services/api/v1/tokens
+Authorization: Bearer <dhk_test_… secret key>
+Content-Type: application/json
+
+{"userId": "...", "name": "..."}
+  ->  {"accessToken": "...", "expiresIn": 3600}
+```
+
+Called by your **backend**, with your secret key, which must never reach a
+client (`openapi/chat-api.yaml:434`, PRD §10.3). Your frontend relays only the
+resulting `accessToken`.
+
+Handing the SDK an IdP token instead produces `AUTH_INVALID`, and the client
+correctly stops after its auth cap — leaving you looking at
+"authentication failed repeatedly" holding a token that is present, unexpired
+and visibly a JWT. The example app decodes the token's *shape* (never its
+signature) and names this case explicitly in its diagnostics strip.
+
+
 ## Running the example
 
 ```bash
