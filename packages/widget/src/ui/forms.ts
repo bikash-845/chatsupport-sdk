@@ -151,8 +151,13 @@ export function createSubmitButton(label: string, busyLabel: string): SubmitButt
 export interface SubmitOnceOptions {
   readonly button: SubmitButtonView;
   readonly status: StatusLineView;
-  /** What the customer is told when the submit rejects. */
-  readonly failureMessage: string;
+  /**
+   * What the customer is told when the submit rejects. A plain string for
+   * every surface that has exactly one failure sentence; a function for one
+   * that needs to choose among several from the rejection itself (the
+   * web-form surface's `visitorMessage`, keyed off a typed error's `kind`).
+   */
+  readonly failureMessage: string | ((error: unknown) => string);
   readonly onError: (error: unknown) => void;
 }
 
@@ -178,7 +183,7 @@ export async function submitOnce(
     await run();
     return true;
   } catch (error) {
-    status.show(failureMessage);
+    status.show(typeof failureMessage === 'string' ? failureMessage : failureMessage(error));
     onError(error);
     return false;
   } finally {

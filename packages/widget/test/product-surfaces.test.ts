@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// The three data-collecting surfaces. Each is a pure DOM module taking a
+// The four data-collecting surfaces. Each is a pure DOM module taking a
 // callback, so all of this is assertable without a socket, a store or a mount.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,7 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCsatSurvey } from '../src/ui/csat.js';
 import { createOfflineForm } from '../src/ui/offline-form.js';
 import { createPreChatForm } from '../src/ui/pre-chat-form.js';
+import { createWebformForm } from '../src/ui/webform-form.js';
 import type { FieldSpec } from '../src/ui/forms.js';
+import type { WebformDraft, WebformReceipt } from '../src/webform.js';
+import { WebformError } from '../src/webform.js';
 
 const NAME: FieldSpec = { id: 'p1', label: 'Your name', type: 'text', required: true };
 const EMAIL: FieldSpec = { id: 'p2', label: 'Email address', type: 'email', required: true };
@@ -448,5 +451,253 @@ describe('CSAT survey', () => {
       options[0]?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
       expect($('.dh-csat-label').textContent).toBe('Poor');
     });
+  });
+});
+
+describe('web-form surface — leaving a message anonymously', () => {
+  function receipt(overrides: Partial<WebformReceipt> = {}): WebformReceipt {
+    return { outcome: 'ticket', receiptId: 'r1', duplicate: false, ...overrides };
+  }
+
+  it('renders Name, Email and Phone, with Email the only required one', () => {
+    const view = createWebformForm(
+      { alternative: null, hours: 'OPEN', source: 'published', extraFields: [] },
+      { onSubmit: async () => receipt(), onError: () => {} },
+    );
+    mount(view.node);
+
+    const labels = $$('.dh-field-label').map((l) => l.textContent);
+    expect(labels).toEqual(['Name (optional)', 'Email', 'Phone (optional)', 'How can we help?']);
+  });
+
+  it('renders the honeypot as a real, hidden, untabbable input', () => {
+    const view = createWebformForm(
+      { alternative: null, hours: 'OPEN', source: 'published', extraFields: [] },
+      { onSubmit: async () => receipt(), onError: () => {} },
+    );
+    mount(view.node);
+
+    const wrap = $('.dh-sr');
+    const honeypot = $<HTMLInputElement>('#dh-webform-company-website');
+    expect(wrap.getAttribute('aria-hidden')).toBe('true');
+    expect(honeypot.getAttribute('tabindex')).toBe('-1');
+    expect(honeypot.name).toBe('company_website');
+    expect(honeypot.value).toBe('');
+  });
+
+  it('shows the closed-hours banner and the merchant’s own offline message only when the entry is published and closed', () => {
+    const view = createWebformForm(
+      { alternative: null, hours: 'CLOSED', source: 'published', offlineMessage: 'Back at 9am.', extraFields: [] },
+      { onSubmit: async () => receipt(), onError: () => {} },
+    );
+    mount(view.node);
+
+    expect($('.dh-form-heading').textContent).toBe("We're currently offline.");
+    expect($('.dh-form-subtitle').textContent).toBe('Back at 9am.');
+  });
+
+  it('never claims the hours under an "assumed" entry, even if CLOSED were somehow passed', () => {
+    const view = createWebformForm(
+      { alternative: null, hours: 'CLOSED', source: 'assumed', extraFields: [] },
+      { onSubmit: async () => receipt(), onError: () => {} },
+    );
+    mount(view.node);
+
+    expect($('.dh-form-heading').textContent).toBe('Leave a message');
+  });
+
+  it('collects prefer: "ticket", the empty honeypot, a fresh submissionId and a non-negative fillMs — never "chat"', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(receipt());
+    const view = createWebformForm(
+      { alternative: 'chat', hours: 'OPEN', source: 'published', extraFields: [] },
+      { onSubmit, onError: () => {} },
+    );
+    mount(view.node);
+
+    type($<HTMLInputElement>('#dh-webform-email'), 'ada@example.com');
+    type($<HTMLTextAreaElement>('#dh-webform-message'), 'Where is my order?');
+    $<HTMLFormElement>('form').requestSubmit();
+    await flush();
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const draft = onSubmit.mock.calls[0]?.[0] as WebformDraft;
+    expect(draft.prefer).toBe('ticket');
+    expect(draft.company_website).toBe('');
+    expect(draft.email).toBe('ada@example.com');
+    expect(draft.message).toBe('Where is my order?');
+    expect(draft.fillMs).toBeGreaterThanOrEqual(0);
+    expect(draft.submissionId.length).toBeGreaterThanOrEqual(8);
+    expect('name' in draft).toBe(false);
+    expect('phone' in draft).toBe(false);
+  });
+
+  it('a retry after a rejected attempt sends the identical submissionId', async () => {
+    const onSubmit = vi
+      .fn()
+      .mockRejectedValueOnce(new WebformError('unavailable', 'boom', true))
+      .mockResolvedValueOnce(receipt());
+    const view = createWebformForm(
+      { alternative: null, hours: 'OPEN', source: 'published', extraFields: [] },
+      { onSubmit, onError: () => {} },
+    );
+    mount(view.node);
+
+    type($<HTMLInputElement>('#dh-webform-email'), 'ada@example.com');
+    type($<HTMLTextAreaElement>('#dh-webform-message'), 'Still there?');
+    $<HTMLFormElement>('form').requestSubmit();
+    await flush();
+    // The form survives the rejection — retry from the same node.
+    $<HTMLFormElement>('form').requestSubmit();
+    await flush();
+
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+    const first = (onSubmit.mock.calls[0]?.[0] as WebformDraft).submissionId;
+    const second = (onSubmit.mock.calls[1]?.[0] as WebformDraft).submissionId;
+    expect(second).toBe(first);
+  });
+
+  it('requires an email before submitting, and focuses it', async () => {
+    const onSubmit = vi.fn();
+    const view = createWebformForm(
+      { alternative: null, hours: 'OPEN', source: 'published', extraFields: [] },
+      { onSubmit, onError: () => {} },
+    );
+    mount(view.node);
+
+    type($<HTMLTextAreaElement>('#dh-webform-message'), 'Hello');
+    $<HTMLFormElement>('form').requestSubmit();
+    await flush();
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect($('.dh-form-error').textContent).toBe('Email is required.');
+    expect(document.activeElement).toBe($('#dh-webform-email'));
+  });
+
+  it('requires a message before submitting', async () => {
+    const onSubmit = vi.fn();
+    const view = createWebformForm(
+      { alternative: null, hours: 'OPEN', source: 'published', extraFields: [] },
+      { onSubmit, onError: () => {} },
+    );
+    mount(view.node);
+
+    type($<HTMLInputElement>('#dh-webform-email'), 'ada@example.com');
+    $<HTMLFormElement>('form').requestSubmit();
+    await flush();
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect($('.dh-form-error').textContent).toBe('Please tell us what you need.');
+  });
+
+  it('shows the "Try live chat anyway" alt only when alternative is "chat", and it does not submit anything', () => {
+    const onChooseChat = vi.fn();
+    const withChat = createWebformForm(
+      { alternative: 'chat', hours: 'CLOSED', source: 'published', extraFields: [] },
+      { onSubmit: async () => receipt(), onChooseChat, onError: () => {} },
+    );
+    mount(withChat.node);
+    const alt = $<HTMLButtonElement>('.dh-webform-alt');
+    alt.click();
+    expect(onChooseChat).toHaveBeenCalledTimes(1);
+
+    const withoutChat = createWebformForm(
+      { alternative: null, hours: 'CLOSED', source: 'published', extraFields: [] },
+      { onSubmit: async () => receipt(), onChooseChat: vi.fn(), onError: () => {} },
+    );
+    mount(withoutChat.node);
+    expect(document.querySelector('.dh-webform-alt')).toBeNull();
+  });
+
+  it('renders Cancel only when onCancel is provided — the automatic (gate-1) form has none', () => {
+    const withCancel = createWebformForm(
+      { alternative: null, hours: 'OPEN', source: 'published', extraFields: [] },
+      { onSubmit: async () => receipt(), onCancel: vi.fn(), onError: () => {} },
+    );
+    mount(withCancel.node);
+    expect($('.dh-form-skip')).toBeTruthy();
+
+    const automatic = createWebformForm(
+      { alternative: null, hours: 'OPEN', source: 'published', extraFields: [] },
+      { onSubmit: async () => receipt(), onError: () => {} },
+    );
+    mount(automatic.node);
+    expect(document.querySelector('.dh-form-skip')).toBeNull();
+  });
+
+  it('moves focus to the field a 400 named', async () => {
+    const onSubmit = vi
+      .fn()
+      .mockRejectedValue(new WebformError('validation', 'bad email', false, { field: 'email' }));
+    const view = createWebformForm(
+      { alternative: null, hours: 'OPEN', source: 'published', extraFields: [] },
+      { onSubmit, onError: () => {} },
+    );
+    mount(view.node);
+
+    type($<HTMLInputElement>('#dh-webform-email'), 'not-an-email');
+    type($<HTMLTextAreaElement>('#dh-webform-message'), 'Hello');
+    $<HTMLFormElement>('form').requestSubmit();
+    await flush();
+
+    expect(document.activeElement).toBe($('#dh-webform-email'));
+  });
+
+  it.each<[WebformReceipt['outcome'], string]>([
+    ['ticket', "Message received. We'll reply to ada@example.com."],
+    ['queued', "Message received. We'll reply to ada@example.com."],
+    ['chat', 'Thanks — someone will pick this up and reply to ada@example.com.'],
+  ])('confirms a %s outcome with the right sentence, and moves focus to it', async (outcome, sentence) => {
+    const view = createWebformForm(
+      { alternative: null, hours: 'OPEN', source: 'published', extraFields: [] },
+      { onSubmit: async () => receipt({ outcome }), onError: () => {} },
+    );
+    mount(view.node);
+
+    type($<HTMLInputElement>('#dh-webform-email'), 'ada@example.com');
+    type($<HTMLTextAreaElement>('#dh-webform-message'), 'Hello');
+    $<HTMLFormElement>('form').requestSubmit();
+    await flush();
+
+    expect($<HTMLFormElement>('form').hidden).toBe(true);
+    const confirmation = $('.dh-offline-sent');
+    expect(confirmation.hidden).toBe(false);
+    expect(confirmation.textContent).toContain(sentence);
+    expect(document.activeElement).toBe(confirmation);
+  });
+
+  it('folds console pre-chat fields into the message body, deduping the built-in labels', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(receipt());
+    const orderField: FieldSpec = { id: 'order', label: 'Order number', type: 'text', required: false };
+    const view = createWebformForm(
+      {
+        alternative: null,
+        hours: 'OPEN',
+        source: 'published',
+        extraFields: [NAME, EMAIL, orderField],
+      },
+      { onSubmit, onError: () => {} },
+    );
+    mount(view.node);
+
+    // NAME/EMAIL duplicate the built-ins and must not render twice.
+    expect($$('.dh-field-label').map((l) => l.textContent)).toEqual([
+      'Name (optional)',
+      'Email',
+      'Phone (optional)',
+      'Order number (optional)',
+      'How can we help?',
+    ]);
+
+    type($<HTMLInputElement>('#dh-webform-email'), 'ada@example.com');
+    type($<HTMLTextAreaElement>('#dh-webform-message'), 'Where is my order?');
+    // Excludes the message textarea, which also carries `.dh-field-input`.
+    const inputs = $$<HTMLInputElement>('input.dh-field-input');
+    const orderInput = inputs[inputs.length - 1]!;
+    type(orderInput, '12345');
+    $<HTMLFormElement>('form').requestSubmit();
+    await flush();
+
+    const draft = onSubmit.mock.calls[0]?.[0] as WebformDraft;
+    expect(draft.message).toBe('Where is my order?\n\nOrder number: 12345');
   });
 });

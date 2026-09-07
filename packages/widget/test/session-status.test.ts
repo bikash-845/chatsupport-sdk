@@ -22,6 +22,7 @@ import type { ChatStatus } from '@dhaam-ccrm/core';
 import type { ChatSessionSummary } from '@dhaam-ccrm/js';
 
 import { createHomeScreen } from '../src/ui/home-screen.js';
+import type { ResolvedEntry } from '../src/remote-config.js';
 import { createMessagesScreen } from '../src/ui/messages-screen.js';
 import { SESSION_STATUS_WORDS, statusLabel, statusPill } from '../src/ui/session-status.js';
 
@@ -34,6 +35,13 @@ const ALL_STATUSES: readonly ChatStatus[] = [
   'RESOLVED',
   'CLOSED',
 ];
+
+/**
+ * This file is about the status vocabulary being shared and total, not about
+ * the chooser — so every call below uses the pre-`support` "assumed" entry,
+ * the same one `entryFor` answers when a fetch never carried one.
+ */
+const ASSUMED_ENTRY: ResolvedEntry = { primary: 'chat', secondary: null, hours: 'UNKNOWN', source: 'assumed' };
 
 function summary(overrides: Partial<ChatSessionSummary> = {}): ChatSessionSummary {
   return {
@@ -109,9 +117,11 @@ describe("Home's recent conversation shows a status for every session", () => {
         onStartNew: vi.fn(),
         onOpenConversation: vi.fn(),
         onSeeAll: vi.fn(),
+        onLeaveMessage: vi.fn(),
+        onChooseChat: vi.fn(),
       });
       document.body.appendChild(home.node);
-      home.update(summary({ status }), '');
+      home.update(summary({ status }), '', ASSUMED_ENTRY);
 
       const pill = home.node.querySelector<HTMLElement>('.dh-home-recent-status');
       expect(pill?.textContent).toBe(statusPill(status));
@@ -126,9 +136,11 @@ describe("Home's recent conversation shows a status for every session", () => {
       onStartNew: vi.fn(),
       onOpenConversation: vi.fn(),
       onSeeAll: vi.fn(),
+      onLeaveMessage: vi.fn(),
+      onChooseChat: vi.fn(),
     });
     document.body.appendChild(home.node);
-    home.update(null, '');
+    home.update(null, '', ASSUMED_ENTRY);
     expect(home.node.querySelector<HTMLElement>('.dh-home-section')?.hidden).toBe(true);
   });
 });
@@ -139,12 +151,14 @@ describe('the two screens read the same table', () => {
       onStartNew: vi.fn(),
       onOpenConversation: vi.fn(),
       onSeeAll: vi.fn(),
+      onLeaveMessage: vi.fn(),
+      onChooseChat: vi.fn(),
     });
     const messages = createMessagesScreen({ onOpenConversation: vi.fn(), onStartNew: vi.fn() });
     document.body.append(home.node, messages.node);
 
     for (const status of ALL_STATUSES) {
-      home.update(summary({ status }), '');
+      home.update(summary({ status }), '', ASSUMED_ENTRY);
       messages.render([summary({ status })], null);
 
       const pill = home.node.querySelector<HTMLElement>('.dh-home-recent-status')?.textContent ?? '';

@@ -100,12 +100,16 @@ import { createCommonQuestions } from './ui/common-questions.js';
 import type { CommonQuestion } from './ui/common-questions.js';
 import {
   DEFAULT_REMOTE_CONFIG,
+  entryFor,
   fetchRemoteConfig,
   shouldCollectOffline,
   shouldMount,
 } from './remote-config.js';
-import type { AutoOpen, RemoteConfig } from './remote-config.js';
+import type { AutoOpen, RemoteConfig, ResolvedEntry } from './remote-config.js';
 import { captureContactInfo } from './contact-info.js';
+import { createWebformForm } from './ui/webform-form.js';
+import { submitWebform, WebformError } from './webform.js';
+import type { WebformDraft, WebformReceipt } from './webform.js';
 
 /** How the host drives the widget after mounting it. */
 export interface ChatWidget {
@@ -456,7 +460,7 @@ function buildAgentAvatar(displayName: string): HTMLElement | null {
 }
 
 /** Which surface is standing in for the chat. */
-type SurfaceKind = 'preChat' | 'offline' | 'csat' | 'report' | 'composingNew' | 'confirmEnd';
+type SurfaceKind = 'preChat' | 'offline' | 'csat' | 'report' | 'composingNew' | 'confirmEnd' | 'webform';
 
 /** What is known about one session's CSAT rating — see `csatBySession`. */
 type CsatLookup =
@@ -505,7 +509,15 @@ function isMissingCsatRoute(error: unknown): boolean {
  * finger, and after Start the freshly minted, still-empty session re-armed
  * the gate before the opening line could land.
  */
-const USER_INITIATED_SURFACES: ReadonlySet<SurfaceKind> = new Set(['composingNew', 'report', 'confirmEnd']);
+const USER_INITIATED_SURFACES: ReadonlySet<SurfaceKind> = new Set([
+  'composingNew',
+  'report',
+  'confirmEnd',
+  // Holds a half-typed message, the identical reason the three above do —
+  // see the gate-1 carve-out in syncProductSurfaces for the one place that
+  // rule alone is not enough.
+  'webform',
+]);
 
 function isUserInitiated(kind: SurfaceKind): boolean {
   return USER_INITIATED_SURFACES.has(kind);
@@ -790,6 +802,14 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
   // Everything below reads `remote` through this holder rather than
   // capturing it, because it is replaced once, asynchronously, after mount.
   let remote: RemoteConfig = DEFAULT_REMOTE_CONFIG;
+  /**
+   * The chooser's one read of `remote` — see `entryFor`. Re-derived
+   * alongside `remote` itself (`applyRemoteConfig`), never independently:
+   * two places deciding what the six rows mean is how they drift.
+   */
+  let entry: ResolvedEntry = entryFor(DEFAULT_REMOTE_CONFIG);
+  /** When `entry` was last refreshed — the clock {@link SUPPORT_STALE_MS} reads. */
+  let remoteFetchedAt = 0;
 
   /**
    * The last unread count seen, so the chime fires on a RISE and nothing else.
@@ -929,6 +949,12 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
   /** Applies the parts of published config that are safe to change in place. */
   const applyRemoteConfig = (next: RemoteConfig): void => {
     remote = next;
+    // The chooser's own read, refreshed in lockstep with `remote` — never
+    // independently, or the two could disagree about which of the six rows
+    // is current. `remoteFetchedAt` is what the open-panel staleness check
+    // (`SUPPORT_STALE_MS`, below) reads.
+    entry = entryFor(next);
+    remoteFetchedAt = Date.now();
 
     // An attribute and a CSS rule rather than a flag threaded into
     // `message-list.ts`: that component owns WHEN the indicator shows (the
@@ -1322,6 +1348,43 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
       applyRemoteConfig(fetched);
     })
     .catch(report);
+
+  /**
+   * How stale a held `support` entry may get before the panel opening
+   * re-asks. `support.primary` flips at a shift boundary, and config is
+   * otherwise fetched once, at mount — a tab left open across that boundary
+   * would otherwise show a "Chat now" default the server would no longer
+   * choose.
+   *
+   * No timer, no poll: a background re-check on someone else's storefront is
+   * a cost the merchant did not agree to, and it would run on every page for
+   * every visitor whether or not the panel is ever opened. Opening the panel
+   * is the only moment the answer is about to be used — see the check beside
+   * `requestSessions()` in `openPanel`, which states this same argument for
+   * the session list.
+   */
+  const SUPPORT_STALE_MS = 5 * 60_000;
+
+  /**
+   * Re-asks `GET /widget/config` and applies whatever comes back — the same
+   * two functions the boot path above already composes, extracted so they
+   * have one caller more. No new machinery, no new state beyond
+   * `remoteFetchedAt`.
+   *
+   * Silent on failure, exactly like the boot fetch: `fetchRemoteConfig`
+   * already reports nothing to `report()` on a `null`, and a refresh that
+   * cannot land simply leaves `remote`/`entry` exactly as they were.
+   */
+  function refreshRemoteConfig(): Promise<void> {
+    return fetchRemoteConfig({
+      apiUrl: config.apiUrl,
+      publishableKey: config.auth.publishableKey,
+      signal: remoteConfigAbort.signal,
+    }).then((fetched) => {
+      if (destroyed || fetched === null) return;
+      applyRemoteConfig(fetched);
+    });
+  }
 
   // ── launcher ──────────────────────────────────────────────────────────
   const badge = el('span', { attrs: { class: 'dh-badge', hidden: true, 'aria-hidden': 'true' } });
@@ -1766,6 +1829,15 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
     onStartNew: () => openNewConversationFlow(),
     onOpenConversation: (sessionId) => void selectSession(sessionId),
     onSeeAll: () => screens.swap('messages'),
+    onLeaveMessage: () => openWebform(),
+    // Row 2's "Try live chat anyway": hand the visitor to a REAL,
+    // authenticated socket session rather than the anonymous submit path —
+    // discarding the CTA/alt's own slot first, since `openNewConversationFlow`
+    // is about to claim it for a different surface entirely.
+    onChooseChat: () => {
+      discardUserSurface();
+      openNewConversationFlow();
+    },
   });
   // Moved onto Home rather than rebuilt — see home-screen.ts's own header on
   // why this screen arranges the shared component instead of owning a second
@@ -2720,24 +2792,56 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
     const state = store.getState();
 
     if (shouldCollectOffline(remote)) {
+      // The one carve-out gate 1 needs. A Row-2 tenant on `COLLECT_MESSAGE`
+      // has BOTH entry points live at once: the Home CTA opens kind
+      // `'webform'` by hand, and the very next store tick would otherwise
+      // run this gate and call `openSurface('offline', …)` — a DIFFERENT
+      // kind, so `openSurface`'s by-kind idempotence does not save it, and
+      // the visitor's half-typed message is rebuilt out from under them for
+      // no change of outcome (this gate would send them to the identical
+      // destination). Narrow on purpose: `'webform'` is the only kind whose
+      // destination is already the one this gate would impose. Every other
+      // surface still yields to it exactly as before.
+      if (activeSurface?.kind === 'webform') {
+        syncScreens();
+        return;
+      }
+
+      const ticketDestinationExists = entry.primary === 'ticket' || entry.secondary === 'ticket';
       openSurface('offline', () =>
-        createOfflineForm(
-          // `isGuest` here too — this branch outranks BOTH gates below, so
-          // without it an out-of-hours visit was the one path on which a
-          // logged-in customer still met the merchant's pre-chat questions.
-          // The form's own two built-in fields are a different thing and
-          // stay; see `isGuest`'s doc for why.
-          remote.preChatEnabled && isGuest ? [...remote.preChatFields] : [],
-          {
-            onSubmit: (message) =>
-              store.client.sendMessage(
-                `Offline message from ${message.name} (${message.contact}):\n\n${message.message}`,
-                { metadata: { kind: 'offline_message', name: message.name, contact: message.contact } },
-              ),
-            onError: report,
-          },
-          remote.offlineMessage,
-        ),
+        ticketDestinationExists
+          ? createWebformForm(
+              {
+                alternative: entry.secondary === 'chat' ? 'chat' : null,
+                hours: entry.hours,
+                source: entry.source,
+                ...(remote.offlineMessage === undefined ? {} : { offlineMessage: remote.offlineMessage }),
+                extraFields: remote.preChatEnabled && isGuest ? [...remote.preChatFields] : [],
+              },
+              // No `onCancel`, and no `onChooseChat`: this form is standing
+              // in for the composer, not a detour a visitor can back out of,
+              // and there is no live-chat alternative to offer them WHILE
+              // the team is closed — that offer belongs to Row 2's CTA,
+              // reached from Home, not to this automatic gate.
+              { onSubmit: (draft) => sendWebform(draft), onError: report },
+            )
+          : createOfflineForm(
+              // `isGuest` here too — this branch outranks BOTH gates below, so
+              // without it an out-of-hours visit was the one path on which a
+              // logged-in customer still met the merchant's pre-chat questions.
+              // The form's own two built-in fields are a different thing and
+              // stay; see `isGuest`'s doc for why.
+              remote.preChatEnabled && isGuest ? [...remote.preChatFields] : [],
+              {
+                onSubmit: (message) =>
+                  store.client.sendMessage(
+                    `Offline message from ${message.name} (${message.contact}):\n\n${message.message}`,
+                    { metadata: { kind: 'offline_message', name: message.name, contact: message.contact } },
+                  ),
+                onError: report,
+              },
+              remote.offlineMessage,
+            ),
       );
       return;
     }
@@ -3057,7 +3161,7 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
   function syncSessionSurfaces(): void {
     if (destroyed) return;
     const state = store.getState();
-    homeScreen.update(mostRecentSession(state.pastSessions), subtitle ?? '');
+    homeScreen.update(mostRecentSession(state.pastSessions), subtitle ?? '', entry);
     messagesScreen.render(state.pastSessions, state.session?.id ?? null);
   }
 
@@ -3715,6 +3819,83 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
   }
 
   /**
+   * Opens the web-form surface — the visitor-facing chooser's escape hatch
+   * (Row 1's "Leave a message instead") or default (Row 2's CTA). Shaped
+   * exactly like `openReportIssue` above: one slot, one opener, no modal.
+   *
+   * `entry.secondary === 'chat'` is read fresh at BUILD time rather than
+   * closed over once — the same reason `remote.preChatFields` is spread
+   * fresh into every other surface's options — so a config refresh that
+   * lands while the visitor is elsewhere does not leave a stale escape hatch
+   * baked into a form built before it.
+   */
+  function openWebform(): void {
+    const view = openSurface('webform', () =>
+      createWebformForm(
+        {
+          alternative: entry.secondary === 'chat' ? 'chat' : null,
+          hours: entry.hours,
+          source: entry.source,
+          ...(remote.offlineMessage === undefined ? {} : { offlineMessage: remote.offlineMessage }),
+          extraFields: remote.preChatEnabled && isGuest ? [...remote.preChatFields] : [],
+        },
+        {
+          onSubmit: (draft) => sendWebform(draft),
+          onChooseChat: () => {
+            discardUserSurface();
+            openNewConversationFlow();
+          },
+          onCancel: () => cancelUserSurface(view),
+          onError: report,
+        },
+      ),
+    );
+  }
+
+  /**
+   * Submits a web-form draft, with the one recovery §4.4 of the design
+   * requires: a `403 CHANNEL_DISABLED` means chat-service resolved a row
+   * this widget's CACHED `support` no longer agrees with — the merchant
+   * flipped a toggle, or the clock crossed a shift boundary after the
+   * config was fetched. That is a stale-cache signal, not an ordinary
+   * error, because it means the widget rendered a form it should not have.
+   *
+   * Rejects rather than swallowing either way, so the form's own
+   * `submitOnce` keeps the visitor's typed text and shows a sentence —
+   * `fileIssueReport` documents the identical contract for its own surface.
+   */
+  async function sendWebform(draft: WebformDraft): Promise<WebformReceipt> {
+    try {
+      return await submitWebform({ apiUrl: config.apiUrl, publishableKey: config.auth.publishableKey, draft });
+    } catch (error) {
+      if (!(error instanceof WebformError) || error.kind !== 'channel_off') throw error;
+
+      // The cached entry disagreed with the server's live decision. Ask
+      // again before deciding what to tell the visitor — never claim the
+      // channel is off on the strength of a 403 alone.
+      await refreshRemoteConfig();
+
+      if (entry.source === 'assumed' || entry.primary === 'ticket' || entry.secondary === 'ticket') {
+        // Either the refresh itself failed (we know nothing new — NEVER
+        // claim the channel is off on a failed read) or it landed and still
+        // says a ticket destination exists (the refresh disagrees with the
+        // 403). Either way: transient, so the visitor's text and the
+        // button both come back rather than the "switched off" sentence.
+        throw new WebformError('unavailable', 'webform channel_off: refresh did not confirm it', true);
+      }
+
+      // The refresh agrees: the channel has genuinely gone away since this
+      // form was built. Say so, hand the slot back, and let the ordinary
+      // render path show whatever the tenant now actually offers — possibly
+      // nothing at all (Row 6 hides the launcher outright).
+      discardUserSurface();
+      syncScreens();
+      launcher.hidden = !shouldMount(remote);
+      throw error;
+    }
+  }
+
+  /**
    * Ends the conversation, at the customer's request.
    *
    * `closeSession` goes through chat-service's own
@@ -4082,6 +4263,12 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
     // only the first — a status can have moved while the panel was shut, and
     // nothing else would tell us. See `refreshSessions`.
     requestSessions();
+
+    // The identical argument, for the chooser's own entry: opening the panel
+    // is the one moment the answer is about to be used, and the browser's
+    // own HTTP cache (`max-age=30, stale-while-revalidate=300`) makes this
+    // usually free. No timer, no poll — see `refreshRemoteConfig`'s own doc.
+    if (Date.now() - remoteFetchedAt > SUPPORT_STALE_MS) void refreshRemoteConfig();
 
     try {
       store.client.markRead();

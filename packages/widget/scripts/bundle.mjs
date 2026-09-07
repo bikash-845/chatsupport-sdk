@@ -57,6 +57,20 @@ console.log('');
 console.log(`  dist/widget.js   ${fmt(bytes.length)} raw   ${fmt(gzipped.length)} gzip`);
 console.log('');
 
+// A build failure, not a review comment. 90 KiB — roughly 4.9 KB of headroom
+// over the pre-chooser baseline (85,897 B gzip, measured 2026-09-06) —
+// enough to absorb an estimate that is off, not enough to absorb a second
+// feature riding in on top of this one unnoticed.
+const WIDGET_GZIP_BUDGET = 92_160;
+if (gzipped.length > WIDGET_GZIP_BUDGET) {
+  console.error(
+    `  ERROR: dist/widget.js is ${fmt(gzipped.length)} gzip, over the ${fmt(WIDGET_GZIP_BUDGET)} budget.`,
+  );
+  console.error('  Either trim the addition or raise WIDGET_GZIP_BUDGET with a reason, not silently.');
+  console.log('');
+  process.exitCode = 1;
+}
+
 // What dominates, by origin. A single "the bundle is N KB" number is not
 // actionable; "core is two thirds of it" tells you where to look.
 // The `.js` output specifically — `outputs` also holds the sourcemap entry,
