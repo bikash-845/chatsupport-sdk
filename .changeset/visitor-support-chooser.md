@@ -36,3 +36,9 @@ to ship ahead of the chat-service release it depends on.
 Additive and backward compatible: every existing tenant without a published
 `support` block sees byte-identical behaviour, pinned by an exhaustive test
 against the pre-chooser `shouldMount` rule.
+
+**Bundle, measured (`scripts/bundle.mjs`), not estimated:** `dist/widget.js`
+was 290,319 B raw / 85,985 B gzip before this change; it is now 301,764 B raw
+/ 89,223 B gzip — **+11,445 B raw, +3,238 B gzip (+3.8%)**. `WIDGET_GZIP_BUDGET`
+(92,160 B / 90 KiB) now fails the build if a future addition pushes past
+roughly 2.9 KB more headroom.

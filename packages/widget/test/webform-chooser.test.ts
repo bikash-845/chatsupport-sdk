@@ -486,6 +486,70 @@ describe('CHANNEL_DISABLED — a stale-cache signal, not a plain error', () => {
     expect(find<HTMLTextAreaElement>('#dh-webform-message')?.value).toBe('Hello?');
     expect(find('.dh-webform-form .dh-form-error')?.textContent).toMatch(/try again/i);
   });
+
+  it('when the refresh itself fails, never claims the channel is off — the retry sentence, not "switched off"', async () => {
+    // Succeeds once, at mount; the SECOND call (the CHANNEL_DISABLED
+    // recovery's own re-fetch) fails outright — the network dropped between
+    // the 403 and the widget's attempt to make sense of it.
+    let configCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('/widget/webform')) return webformPost(url);
+        if (url.includes('/widget/config')) {
+          configCalls += 1;
+          if (configCalls > 1) throw new TypeError('Failed to fetch');
+          return new Response(
+            JSON.stringify(published({ support: { primary: 'ticket', secondary: null, hours: 'OPEN' } })),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        if (url.includes('/chat/sessions/customer')) {
+          return new Response(JSON.stringify({ success: true, data: { sessions: [] } }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.includes('/chat/sessions/')) {
+          return new Response(JSON.stringify({ success: true, data: { messages: [], hasMore: false } }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ accessToken: 'tok', expiresIn: 3600 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }),
+    );
+    webformPost.mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: 'CHANNEL_DISABLED', message: 'off', retryable: false } }), {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    const widget = mount(config());
+    await settle();
+    widget.open();
+    await settle();
+    find<HTMLButtonElement>('.dh-home-cta')!.click();
+    await settle();
+    find<HTMLInputElement>('#dh-webform-email')!.value = 'ada@example.com';
+    find<HTMLTextAreaElement>('#dh-webform-message')!.value = 'Hello?';
+    find<HTMLFormElement>('.dh-webform-form')!.requestSubmit();
+    await settle();
+
+    // A failed READ must never be read as "the channel is confirmed off" —
+    // that would tell a visitor messaging is switched off on the strength of
+    // a dropped packet. The form survives with the generic retry sentence.
+    expect(find('.dh-webform-form')).not.toBeNull();
+    expect(find<HTMLTextAreaElement>('#dh-webform-message')?.value).toBe('Hello?');
+    const message = find('.dh-webform-form .dh-form-error')?.textContent ?? '';
+    expect(message).toMatch(/try again/i);
+    expect(message).not.toMatch(/switched off/i);
+  });
 });
 
 describe('the gate-1 carve-out', () => {

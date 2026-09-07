@@ -203,3 +203,34 @@ describe('shouldMount — the compatibility guarantee', () => {
     expect(shouldMount(cfg)).toBe(false);
   });
 });
+
+// The chooser's published surface (design §11) — a smoke test that these
+// actually resolve through the package's ONE entry point, `@dhaam-ccrm/
+// widget`, rather than only existing as internal exports the design promised
+// a host could import and nobody wired up.
+describe('the chooser is published from the package entry point', () => {
+  it('entryFor, parseSupport and shouldMount are reachable from ../src/index.js', async () => {
+    const pkg = await import('../src/index.js');
+    expect(pkg.entryFor(DEFAULT_REMOTE_CONFIG)).toEqual({
+      primary: 'chat',
+      secondary: null,
+      hours: 'UNKNOWN',
+      source: 'assumed',
+    });
+    expect(pkg.parseSupport({ primary: 'ticket', hours: 'OPEN' })).toEqual({
+      primary: 'ticket',
+      secondary: null,
+      hours: 'OPEN',
+    });
+    expect(pkg.shouldMount(DEFAULT_REMOTE_CONFIG)).toBe(true);
+  });
+
+  it('submitWebform, visitorMessage, WebformError and the webform constants are reachable from ../src/index.js', async () => {
+    const pkg = await import('../src/index.js');
+    expect(typeof pkg.submitWebform).toBe('function');
+    expect(typeof pkg.visitorMessage).toBe('function');
+    expect(pkg.visitorMessage(new pkg.WebformError('network', '', true))).not.toBe('');
+    expect(pkg.WEBFORM_PATH).toBe('/chat-services/api/v1/widget/webform');
+    expect(typeof pkg.WEBFORM_TIMEOUT_MS).toBe('number');
+  });
+});

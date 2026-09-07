@@ -71,6 +71,20 @@ export { resolveConfig, WidgetConfigError, parseMode } from './config.js';
 export { looksLikeSecretKey } from './auth.js';
 export { resolvePresentation } from './ui/presentation.js';
 
+// The visitor-facing chooser's published surface (design §11): a host that
+// wants to read the resolved support entry itself — a custom launcher, a
+// status page — needs these without reaching into the package's internals,
+// and `entryFor`/`shouldMount` are the one place the six-row reading lives.
+export { entryFor, parseSupport, shouldMount } from './remote-config.js';
+export type { SupportEntry, ResolvedEntry } from './remote-config.js';
+
+// The anonymous web-form client, published for the same reason `createWidget`
+// is: a third-party integrator building their own surface on this contract
+// should have one client to agree with, not a second one that can drift —
+// see docs/design/sdk-visitor-chooser.md §11's "OR-J" on exactly that risk.
+export { submitWebform, visitorMessage, WebformError, WEBFORM_PATH, WEBFORM_TIMEOUT_MS } from './webform.js';
+export type { WebformDraft, WebformReceipt, WebformFailureKind } from './webform.js';
+
 export type { ChatWidget } from './widget.js';
 export type { WidgetConfig, WidgetAuth, WidgetIdentity, ResolvedConfig } from './config.js';
 export type { PresentationMode, ResolvedPresentation } from './ui/presentation.js';

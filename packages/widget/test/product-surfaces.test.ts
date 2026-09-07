@@ -608,6 +608,25 @@ describe('web-form surface — leaving a message anonymously', () => {
     expect(document.querySelector('.dh-webform-alt')).toBeNull();
   });
 
+  // Row 2's `openWebform` always supplies BOTH `onCancel` and `onChooseChat`
+  // (design §5.2), so Cancel and "Try live chat anyway" can be on screen
+  // TOGETHER — the shape that once made `.dh-home-alt` collide with
+  // `.dh-form-skip` (see home-screen.ts's own comment) would recur here if
+  // the two controls shared a class. They must not: exactly one
+  // `.dh-form-skip` — Cancel — and the chat alt reachable only by its own
+  // class.
+  it('Cancel and the chat alt coexist without colliding on .dh-form-skip', () => {
+    const view = createWebformForm(
+      { alternative: 'chat', hours: 'CLOSED', source: 'published', extraFields: [] },
+      { onSubmit: async () => receipt(), onCancel: vi.fn(), onChooseChat: vi.fn(), onError: () => {} },
+    );
+    mount(view.node);
+
+    expect($$('.dh-form-skip')).toHaveLength(1);
+    expect($$('.dh-form-skip')[0]?.textContent).toBe('Cancel');
+    expect($('.dh-webform-alt').textContent).toBe('Try live chat anyway');
+  });
+
   it('renders Cancel only when onCancel is provided — the automatic (gate-1) form has none', () => {
     const withCancel = createWebformForm(
       { alternative: null, hours: 'OPEN', source: 'published', extraFields: [] },

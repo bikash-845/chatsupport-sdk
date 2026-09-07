@@ -166,10 +166,18 @@ export function createWebformForm(
           on: { click: () => callbacks.onCancel?.() },
         });
 
+  // Its own class, deliberately NOT `.dh-form-skip`: on Row 2, `openWebform`
+  // supplies BOTH `onCancel` and `onChooseChat` unconditionally (design
+  // §5.2), and this button and Cancel above can therefore be on screen
+  // together — sharing a class here would make `.dh-form-skip` stop
+  // uniquely identifying "the Cancel button" within an open surface, the
+  // same collision `ui/home-screen.ts`'s own alt button caused once already
+  // (see that file's comment). `.dh-webform-alt` gets `.dh-form-skip`'s LOOK
+  // (styles.ts) without its identity.
   const chatAlt =
     options.alternative === 'chat' && callbacks.onChooseChat !== undefined
       ? el('button', {
-          attrs: { class: 'dh-form-skip dh-webform-alt', type: 'button' },
+          attrs: { class: 'dh-webform-alt', type: 'button' },
           text: 'Try live chat anyway',
           on: { click: () => callbacks.onChooseChat?.() },
         })

@@ -2146,6 +2146,20 @@ button {
 }
 
 .dh-offline, .dh-webform { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+
+/* Row 2's "Try live chat anyway", inside the web-form surface. Matches
+   .dh-form-skip's look without sharing its class — the Cancel button beside
+   it also carries .dh-form-skip, and the two can be on screen together (see
+   ui/webform-form.ts's own comment), so sharing a class here would break
+   .dh-form-skip's "the one Cancel/Skip control" meaning within this form. */
+.dh-webform-alt {
+  min-height: 36px;
+  color: var(--dh-text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .dh-offline-banner {
   display: flex;
   flex-direction: column;

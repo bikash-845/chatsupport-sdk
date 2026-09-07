@@ -1371,18 +1371,25 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
    * have one caller more. No new machinery, no new state beyond
    * `remoteFetchedAt`.
    *
-   * Silent on failure, exactly like the boot fetch: `fetchRemoteConfig`
-   * already reports nothing to `report()` on a `null`, and a refresh that
-   * cannot land simply leaves `remote`/`entry` exactly as they were.
+   * Resolves `true` iff a fresh config actually landed and was applied,
+   * `false` otherwise — never rejects. The boolean is load-bearing for
+   * `sendWebform`'s `CHANNEL_DISABLED` recovery (§4.4), which must tell "the
+   * refresh failed, so we know nothing new" apart from "the refresh landed
+   * and still disagrees with the 403": `entry`/`remote` are left EXACTLY as
+   * they were on a failed refresh (`fetchRemoteConfig` already reports
+   * nothing to `report()` on a `null`), so a caller that inferred success
+   * from `entry` alone would silently read a stale-but-unchanged entry as a
+   * fresh one.
    */
-  function refreshRemoteConfig(): Promise<void> {
+  function refreshRemoteConfig(): Promise<boolean> {
     return fetchRemoteConfig({
       apiUrl: config.apiUrl,
       publishableKey: config.auth.publishableKey,
       signal: remoteConfigAbort.signal,
     }).then((fetched) => {
-      if (destroyed || fetched === null) return;
+      if (destroyed || fetched === null) return false;
       applyRemoteConfig(fetched);
+      return true;
     });
   }
 
@@ -3873,14 +3880,16 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
       // The cached entry disagreed with the server's live decision. Ask
       // again before deciding what to tell the visitor — never claim the
       // channel is off on the strength of a 403 alone.
-      await refreshRemoteConfig();
+      const refreshed = await refreshRemoteConfig();
 
-      if (entry.source === 'assumed' || entry.primary === 'ticket' || entry.secondary === 'ticket') {
-        // Either the refresh itself failed (we know nothing new — NEVER
-        // claim the channel is off on a failed read) or it landed and still
-        // says a ticket destination exists (the refresh disagrees with the
-        // 403). Either way: transient, so the visitor's text and the
-        // button both come back rather than the "switched off" sentence.
+      if (!refreshed || entry.primary === 'ticket' || entry.secondary === 'ticket') {
+        // Either the refresh itself FAILED — `refreshed` says so explicitly,
+        // rather than being inferred from `entry`, which a failed refresh
+        // leaves untouched rather than resetting to 'assumed' (see
+        // `refreshRemoteConfig`'s own doc) — or it landed and still says a
+        // ticket destination exists (the refresh disagrees with the 403).
+        // Either way: transient, so the visitor's text and the button both
+        // come back rather than the "switched off" sentence.
         throw new WebformError('unavailable', 'webform channel_off: refresh did not confirm it', true);
       }
 
