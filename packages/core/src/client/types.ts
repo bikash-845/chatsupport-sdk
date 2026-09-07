@@ -285,6 +285,25 @@ export interface ChatClientConfig {
   readonly publishableKey: string;
 
   /**
+   * WHO this client talks to, when it is not the support desk — the
+   * (role, id) pair, e.g. `{ role: 'merchant', id: '42' }`.
+   *
+   * Omit it and this client is the support conversation it has always been;
+   * every existing integration is unaffected.
+   *
+   * Set once, at `createChatClient()`. It is part of WHICH conversation this
+   * client holds, not a filter on it — a host that needs to talk to two
+   * merchants creates two clients.
+   *
+   * The ROLE names the counterparty, never the caller: the caller's own role
+   * rides the server-minted token and cannot be influenced from here. The
+   * server validates it against a closed set, and refuses a caller who is not
+   * permitted to OPEN a conversation with that counterparty (a merchant may
+   * reply in one, never start one).
+   */
+  readonly target?: { readonly role: string; readonly id: string };
+
+  /**
    * §6.1 types this `() => Promise<string>`. Widened here to `TokenProvider`
    * (connection/types.ts) — `Promise<string | AuthToken> | string | AuthToken`
    * — which is a strict superset: every `() => Promise<string>` already

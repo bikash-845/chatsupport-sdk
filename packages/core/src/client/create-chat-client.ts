@@ -515,6 +515,9 @@ export function createChatClient(config: ChatClientConfig): ChatClient {
     store,
     url: wsUrl,
     publishableKey,
+    // Absent, not `undefined` — `exactOptionalPropertyTypes` makes those
+    // different, and absence is what selects the support conversation.
+    ...(config.target === undefined ? {} : { target: config.target }),
     getToken: config.getToken,
     createTransport,
     onFrame: dispatchFrame,

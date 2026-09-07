@@ -58,6 +58,29 @@ export interface ConnectionHelloPayload {
   /** Highest protocol version this client supports (§7.5). */
   protocolVersion: number;
 
+  /**
+   * WHO this conversation is with, when it is not the support desk — a
+   * (role, id) PAIR, flat on the wire.
+   *
+   * `targetRole` names the TARGET's role ("merchant"), never the caller's: the
+   * caller's own role rides the verified token and no frame can influence it.
+   * The server checks it against a CLOSED set, so an unrecognised role is a
+   * malformed frame rather than a conversation addressed to nobody.
+   *
+   * Both absent ⇒ the support desk, which is every conversation this SDK
+   * opened before this field existed. Sent on EVERY hello for a targeted
+   * conversation, reconnects included — not just the first — because the pair
+   * is part of WHICH conversation the server resumes. Omitting it on a
+   * reconnect would silently resume the customer's support chat instead.
+   *
+   * INITIATION IS ASYMMETRIC: a customer, admin or manager opens a
+   * conversation with a merchant; a merchant only ever replies in one that
+   * already exists. A merchant client that sends these is REFUSED by the
+   * server — the rule is enforced there, not by this client omitting them.
+   */
+  targetRole?: string;
+  targetId?: string;
+
   /** Last applied `seq` (D2). Omit on first connect. */
   resumeFrom?: number;
 
