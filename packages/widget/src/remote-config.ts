@@ -128,6 +128,22 @@ export interface PublishedFlow {
 }
 
 /**
+ * chat-service's rendering instruction for this tenant's support entry
+ * point, at this instant — field-for-field the sibling design's
+ * `PublicSupportEntry` (`docs/design/chat-service-webform-endpoint.md` §7.2,
+ * `docs/design/DECISIONS.md` D11). Six rows, resolved server-side by
+ * `decideWebformOutcome`; this package reads the answer and never re-derives
+ * the table — see {@link entryFor}.
+ */
+export interface SupportEntry {
+  /** What the widget offers first. */
+  readonly primary: 'chat' | 'ticket' | 'offline' | 'none';
+  /** The other option, when the row offers one; `null` when it does not. */
+  readonly secondary: 'chat' | 'ticket' | null;
+  readonly hours: 'OPEN' | 'CLOSED' | 'NO_CALENDAR';
+}
+
+/**
  * The published config, after parsing — every field already defaulted, so no
  * consumer re-decides one.
  *
@@ -252,6 +268,14 @@ export interface RemoteConfig {
   readonly flows: readonly PublishedFlow[];
   readonly botDisplayName: string | undefined;
   readonly publishedVersion: number;
+  /**
+   * chat-service's own resolution of the visitor's support entry point —
+   * `data.support`, field-for-field the sibling `PublicSupportEntry` contract.
+   * `null` means "the fetch never told us" (an older chat-service, an absent
+   * key, or the whole fetch failing) — see {@link entryFor} for how that
+   * degrades, and DO NOT read this field directly; go through {@link entryFor}.
+   */
+  readonly support: SupportEntry | null;
 }
 
 /** What a widget renders when the config could not be read at all. */
@@ -317,6 +341,10 @@ export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
   flows: [],
   botDisplayName: undefined,
   publishedVersion: 0,
+  // "we could not ask" ≠ "there is nothing" — the same argument the
+  // `isOpenNow` default already makes above. `entryFor` reads this and
+  // answers a chat entry point, never a guessed ticket or a hidden launcher.
+  support: null,
 };
 
 /** Path is fixed by chat-service; only the origin is the host's to state. */
@@ -722,6 +750,28 @@ function parseFlows(value: unknown): readonly PublishedFlow[] {
   return flows;
 }
 
+const ENTRY_PRIMARY = ['chat', 'ticket', 'offline', 'none'] as const;
+const ENTRY_SECONDARY = ['chat', 'ticket'] as const;
+const ENTRY_HOURS = ['OPEN', 'CLOSED', 'NO_CALENDAR'] as const;
+
+/**
+ * Reads `data.support`, or `null` for anything this bundle does not
+ * recognise.
+ *
+ * Refuses rather than defaults, exactly like {@link oneOf} (which answers
+ * `undefined` for an unrecognised value): a `primary` a newer console
+ * publishes and this bundle has never heard of must degrade to "we could not
+ * ask" (which renders a chat entry — see {@link entryFor}) rather than to a
+ * member of this union it merely happens to sort next to.
+ */
+export function parseSupport(value: unknown): SupportEntry | null {
+  if (!isRecord(value)) return null;
+  const primary = oneOf(value, 'primary', ENTRY_PRIMARY);
+  const hours = oneOf(value, 'hours', ENTRY_HOURS);
+  if (primary === undefined || hours === undefined) return null;
+  return { primary, secondary: oneOf(value, 'secondary', ENTRY_SECONDARY) ?? null, hours };
+}
+
 /**
  * Turns a wire body into a {@link RemoteConfig}, or `null` if it is not one.
  *
@@ -791,6 +841,7 @@ export function parseRemoteConfig(body: unknown): RemoteConfig | null {
     flows: parseFlows(data['flows']),
     botDisplayName: str(data, 'botDisplayName'),
     publishedVersion: typeof rawVersion === 'number' ? rawVersion : 0,
+    support: parseSupport(data['support']),
   };
 }
 
@@ -868,19 +919,82 @@ export function mergeRemoteConfig(host: WidgetConfig, remote: RemoteConfig | nul
 }
 
 /**
- * Whether the widget should mount a launcher at all.
+ * Never `null`. What the UI actually renders from — the chooser's one read of
+ * published config, resolved once here rather than re-derived at every call
+ * site.
+ */
+export interface ResolvedEntry {
+  readonly primary: 'chat' | 'ticket' | 'offline' | 'none';
+  readonly secondary: 'chat' | 'ticket' | null;
+  readonly hours: 'OPEN' | 'CLOSED' | 'NO_CALENDAR' | 'UNKNOWN';
+  /**
+   * `'published'` when the server stated this; `'assumed'` when it did not.
+   *
+   * Load-bearing, not diagnostic. It is what {@link shouldMount} reads to
+   * know it must fall through to the pre-`support` rule, and it is what every
+   * UI consumer must check before rendering a sentence that claims knowledge
+   * — no "we're closed", no "we'll reply by email" — over an entry this
+   * bundle merely assumed rather than one chat-service actually published.
+   */
+  readonly source: 'published' | 'assumed';
+}
+
+/**
+ * The tenant's support entry point, resolved.
  *
- * Two independent off-switches, both remote:
- *   - `enabled: false` — the merchant turned the widget off outright.
- *   - `offlineMode: HIDE_WIDGET` while `isOpenNow === false` — the merchant
- *     chose to disappear outside business hours rather than take messages.
+ * Lives here beside `shouldMount`/`shouldCollectOffline`/`isOutOfHours`
+ * rather than in a module of its own: it is the fourth question of exactly
+ * the same kind, asked of exactly the same object.
  *
- * `isOpenNow === null` never hides anything: it means the tenant does not
- * follow business hours, so there is no "outside" to be outside of.
+ * It does NOT re-derive the six-row decision table. chat-service resolves it
+ * authoritatively (`decideWebformOutcome`, `docs/design/
+ * chat-service-webform-endpoint.md` §7.2) and this reads the answer — a
+ * second derivation is a second thing to keep in sync, and this widget
+ * cannot see the channel-enablement flags and must not compute hours on a
+ * clock the visitor controls (see `ui/offline-form.ts`'s own header).
+ */
+export function entryFor(remote: RemoteConfig): ResolvedEntry {
+  if (remote.support === null) {
+    // The pre-`support` world, verbatim: chat is the entry point, and
+    // offlineMode/isOpenNow decide the rest (see `shouldMount` below).
+    return { primary: 'chat', secondary: null, hours: 'UNKNOWN', source: 'assumed' };
+  }
+  return { ...remote.support, source: 'published' };
+}
+
+/** Today's `shouldMount` rule, lifted out so both callers below share it. */
+function hoursHideRule(remote: RemoteConfig): boolean {
+  return !(remote.offlineMode === OFFLINE_MODE.HIDE_WIDGET && remote.isOpenNow === false);
+}
+
+/**
+ * Whether the widget should mount a launcher at all. EXTENDED, not replaced.
+ *
+ * ORDER MATTERS. `source` is tested FIRST: with no published entry,
+ * {@link entryFor} answers `primary: 'chat'`, so a `primary !== 'offline'`
+ * check placed above it would return `true` unconditionally and silently
+ * delete today's `HIDE_WIDGET` behaviour for every deployment that has not
+ * yet got a `support` block — which is every deployment, on the day this
+ * ships. With `support === null` every call reaches {@link hoursHideRule}
+ * after the `enabled` check, which is BYTE-IDENTICAL to this function's
+ * pre-chooser behaviour — the property that lets the chooser ship before
+ * chat-service does (see the exhaustive compatibility test in
+ * `test/support-entry.test.ts`).
+ *
+ * The published-`'offline'` clause is narrow on purpose: `offlineMode` is a
+ * LIVE CHAT setting, and a tenant who chose "hide the widget outside hours"
+ * was answering a question about chat. On row 5 (chat off, ticket on) hours
+ * are irrelevant and that answer has nothing to say — so a tenant who turns
+ * webform on is shown a launcher even under `HIDE_WIDGET`, and no existing
+ * tenant's behaviour changes until they opt into webform.
  */
 export function shouldMount(remote: RemoteConfig): boolean {
   if (!remote.enabled) return false;
-  return !(remote.offlineMode === OFFLINE_MODE.HIDE_WIDGET && remote.isOpenNow === false);
+  const entry = entryFor(remote);
+  if (entry.source === 'assumed') return hoursHideRule(remote);
+  if (entry.primary === 'none') return false;
+  if (entry.primary === 'offline') return hoursHideRule(remote);
+  return true;
 }
 
 /**

@@ -2145,7 +2145,21 @@ button {
   text-underline-offset: 2px;
 }
 
-.dh-offline { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.dh-offline, .dh-webform { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+
+/* Row 2's "Try live chat anyway", inside the web-form surface. Matches
+   .dh-form-skip's look without sharing its class — the Cancel button beside
+   it also carries .dh-form-skip, and the two can be on screen together (see
+   ui/webform-form.ts's own comment), so sharing a class here would break
+   .dh-form-skip's "the one Cancel/Skip control" meaning within this form. */
+.dh-webform-alt {
+  min-height: 36px;
+  color: var(--dh-text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .dh-offline-banner {
   display: flex;
   flex-direction: column;
@@ -2445,6 +2459,29 @@ button {
 .dh-home-cta-sub { font-size: 12px; color: var(--dh-text-muted); }
 .dh-home-cta-sub[hidden] { display: none; }
 .dh-home-chevron { flex: none; font-size: 20px; line-height: 1; color: var(--dh-text-muted); }
+
+/* The chooser's alt affordance — Row 1's "Leave a message instead" or Row
+   2's "Try live chat anyway". Matches .dh-form-skip's LOOK (same rule, same
+   values) without sharing its class — see ui/home-screen.ts's own comment on
+   why: this button lives on Home, permanently in the DOM, so sharing a class
+   that every form's Skip/Cancel button also uses broke that class's
+   uniqueness within whichever surface was actually open. */
+.dh-home-alt {
+  align-self: flex-start;
+  margin-top: calc(var(--dh-space) * -3);
+  min-height: 36px;
+  color: var(--dh-text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.dh-home-alt[hidden] { display: none; }
+
+/* The mid-visit chat→ticket announcement, above the CTA. role="status", not
+   alert — see ui/home-screen.ts's own comment on why. */
+.dh-entry-note { margin: 0; font-size: 12.5px; color: var(--dh-text-muted); }
+.dh-entry-note[hidden] { display: none; }
 
 .dh-home-section { display: flex; flex-direction: column; gap: calc(var(--dh-space) * 2); }
 .dh-home-section-head { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--dh-space) * 2); }
