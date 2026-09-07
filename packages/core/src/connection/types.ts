@@ -152,6 +152,20 @@ export interface ConnectionControllerOptions {
    */
   readonly publishableKey?: string;
 
+  /**
+   * WHO to talk to, when it is not the support desk — the (role, id) pair.
+   *
+   * Set ONCE at construction and never mutated: it is part of the identity of
+   * the conversation this controller holds, so changing it would silently
+   * repoint an open connection at a different thread. A client that needs two
+   * counterparties creates two controllers, which is the same shape the
+   * multi-conversation customer case already needs.
+   *
+   * Absent ⇒ the support desk. Every existing caller omits it and is
+   * byte-for-byte unaffected.
+   */
+  readonly target?: { readonly role: string; readonly id: string };
+
   /** Credentials (§10.4). */
   readonly getToken: TokenProvider;
 

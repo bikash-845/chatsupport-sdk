@@ -134,6 +134,11 @@ export class ConnectionController {
   readonly #url: string;
   /** Absent on a STAFF connection — see `ConnectionControllerOptions.publishableKey`. */
   readonly #publishableKey: string | undefined;
+  /**
+   * The counterparty this connection's conversation is with, or undefined for
+   * the support desk. Readonly and set once — see `ConnectionControllerOptions.target`.
+   */
+  readonly #target: { readonly role: string; readonly id: string } | undefined;
   readonly #onFrame: ((frame: ServerFrame) => void) | undefined;
   readonly #onResumeGap: ((gap: ResumeGap) => void) | undefined;
   readonly #refreshAtFraction: number;
@@ -208,6 +213,7 @@ export class ConnectionController {
     this.#store = options.store;
     this.#url = options.url;
     this.#publishableKey = options.publishableKey;
+    this.#target = options.target;
     this.#getToken = options.getToken;
     this.#schedule = options.schedule ?? systemTimers;
     this.#transportBackoff = options.transportBackoff ?? new TransportBackoffPolicy();
@@ -487,6 +493,17 @@ export class ConnectionController {
       // thing from an absent key — the same absence rule `resumeFrom` follows
       // below.
       ...(this.#publishableKey === undefined ? {} : { publishableKey: this.#publishableKey }),
+      // The counterparty, on EVERY hello for a targeted conversation —
+      // reconnects included, unlike `subject`/`topic` below which are latched
+      // for one mint. The pair is part of WHICH conversation the server
+      // resumes (its reuse lookup is scoped by it), so omitting it on a
+      // reconnect would resume the customer's SUPPORT chat instead of their
+      // conversation with the merchant. Same `=== undefined` absence rule as
+      // every optional field here, for the `exactOptionalPropertyTypes` reason
+      // `publishableKey` gives above.
+      ...(this.#target === undefined
+        ? {}
+        : { targetRole: this.#target.role, targetId: this.#target.id }),
       // D2 §8.3: sent on *any* transition into `authenticating`, reconnect and
       // first connect alike. Omitted entirely on a first connection — under
       // `exactOptionalPropertyTypes` an explicit `undefined` is a different
