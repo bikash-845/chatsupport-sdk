@@ -37,6 +37,12 @@ dependencies:
     path: ../../dart
   # The REST surface `dhaam_chat` deliberately does not speak. `RestClient` and
   # `captureContactInfo` come from here.
+  # The example reads ChatWidgetCubit's state directly for its developer
+  # diagnostics strip. dhaam_chat_flutter depends on flutter_bloc and
+  # re-exports the Cubit, but a package that IMPORTS flutter_bloc by name
+  # must declare it -- `depend_on_referenced_packages` is right that relying
+  # on a transitive dependency breaks the moment the middle package drops it.
+  flutter_bloc: ^9.1.1
   dhaam_chat_rest:
     path: ../../dart_rest
   # The Flutter UI — `ChatWidget`, `ChatWidgetCubit`, `ChatClientAdapter`.

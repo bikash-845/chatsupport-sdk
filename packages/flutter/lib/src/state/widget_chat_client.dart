@@ -165,6 +165,30 @@ abstract interface class WidgetChatClient {
   /// that are about the EVENT rather than the state: a chime, a toast.
   Stream<AgentEvent> get agentEvents;
 
+  /// Every §6.5 protocol error the connection reports, as it reports it.
+  ///
+  /// ── Why this is on the narrow interface at all ──────────────────────────
+  ///
+  /// It was not, and the cost was concrete: a developer pointing the SDK at a
+  /// misconfigured endpoint saw the client reconnect forever with nothing
+  /// naming the cause. `AUTH_INVALID`, `VALIDATION_FAILED` and a refused
+  /// protocol version all look identical from outside — a panel that says
+  /// "Connecting…" and never stops. The failure is REPORTED by `ChatClient`;
+  /// it simply had no route to a widget.
+  ///
+  /// Not every error here is fatal — the connection may recover on the next
+  /// attempt — so this is diagnostic, not a reason to tear the UI down. Pair
+  /// it with [suspendReason], which says when the client has actually given up.
+  Stream<ErrorPayload> get errors;
+
+  /// Why the client stopped trying, or null while it is still trying.
+  ///
+  /// The difference between "this is slow" and "this will never work", which
+  /// [ConnectionState.suspended] alone cannot express: an exhausted auth
+  /// cap and a refused protocol version are both terminal and want opposite
+  /// messages in front of a customer.
+  SuspendReason? get suspendReason;
+
   /// Replays ONE failed send under its original envelope id (§9.3, D1).
   ///
   /// Not [retryNow], which is the connection's backoff and says nothing about
@@ -256,6 +280,12 @@ class ChatClientAdapter implements WidgetChatClient {
 
   @override
   Stream<AgentEvent> get agentEvents => _client.agentEvents;
+
+  @override
+  Stream<ErrorPayload> get errors => _client.errors;
+
+  @override
+  SuspendReason? get suspendReason => _client.suspendReason;
 
   @override
   RetryOutcome retry(String messageId) => _client.retry(messageId);

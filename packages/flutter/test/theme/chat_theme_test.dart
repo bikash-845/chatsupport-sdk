@@ -50,19 +50,39 @@ void main() {
         'an absent accent falls back to the JS widget\'s own default (#1f2937)',
         () {
       final theme = chatThemeData(_config(), Brightness.light);
-      expect(
-          theme.colorScheme,
-          ColorScheme.fromSeed(
-              seedColor: kDefaultAccent, brightness: Brightness.light));
+      expect(theme.colorScheme.primary, kDefaultAccent);
     });
 
-    test('a published accent seeds the ColorScheme', () {
-      final theme = chatThemeData(_config(accent: '#ff0000'), Brightness.light);
-      expect(
-        theme.colorScheme,
-        ColorScheme.fromSeed(
-            seedColor: const Color(0xFFFF0000), brightness: Brightness.light),
-      );
+    test('a published accent reaches primary VERBATIM, not tonally mapped', () {
+      // The bug this pins, reported from a real tenant: `ColorScheme.fromSeed`
+      // does not preserve its seed. It maps the colour into a Material 3 tonal
+      // palette, so crimson came back as maroon and a violet came back pale.
+      // A brand colour is the one value a merchant will hold us to exactly,
+      // and the reference does not transform it at all (`styles.ts:105`).
+      for (final int hex in <int>[0xFFE11D48, 0xFF7C3AED, 0xFFFF0000]) {
+        final Color accent = Color(hex);
+        final ThemeData theme = chatThemeData(
+          _config(accent: '#${hex.toRadixString(16).substring(2)}'),
+          Brightness.light,
+        );
+        expect(theme.colorScheme.primary, accent,
+            reason: 'accent must survive theming unchanged');
+        // The guard that makes pinning `primary` safe: a generated onPrimary
+        // would have been computed against the tonal colour, not this one.
+        expect(theme.colorScheme.onPrimary, readableOn(accent));
+      }
+    });
+
+    test('fromSeed would NOT have preserved the accent — the control', () {
+      // Without this, the test above could pass against an implementation
+      // that never had the problem, and would not notice a revert to
+      // plain fromSeed.
+      const Color crimson = Color(0xFFE11D48);
+      final ColorScheme seeded = ColorScheme.fromSeed(
+          seedColor: crimson, brightness: Brightness.light);
+      expect(seeded.primary, isNot(crimson),
+          reason: 'if this ever passes, Flutter changed fromSeed and the '
+              'pinning above may no longer be necessary');
     });
 
     test(

@@ -122,6 +122,7 @@ class ChatWidgetCubit extends Cubit<ChatWidgetState> {
     _messagesSub = _client.messages.listen(_onMessage);
     _sessionsSub = _client.sessions.listen(_onSession);
     _typingSub = _client.typing.listen(_onTyping);
+    _errorsSub = _client.errors.listen(_onProtocolError);
     _reconnectingSub = _client.reconnecting.listen(_onReconnecting);
     _sessionClosedSub = _client.sessionClosed.listen(_onSessionClosed);
     final ChatSessionActions? actions = sessionActions;
@@ -348,6 +349,7 @@ class ChatWidgetCubit extends Cubit<ChatWidgetState> {
   late final StreamSubscription<ChatMessage> _messagesSub;
   late final StreamSubscription<SessionSnapshot> _sessionsSub;
   late final StreamSubscription<TypingEvent> _typingSub;
+  late final StreamSubscription<ErrorPayload> _errorsSub;
   late final StreamSubscription<ReconnectingEvent> _reconnectingSub;
   late final StreamSubscription<SessionClosed> _sessionClosedSub;
   StreamSubscription<String>? _csatSub;
@@ -1557,6 +1559,24 @@ class ChatWidgetCubit extends Cubit<ChatWidgetState> {
     _syncSurfaces();
   }
 
+  /// A §6.5 protocol error reached the client.
+  ///
+  /// Recorded on the state rather than only reported, because the two answer
+  /// different questions: `onError` tells the HOST something went wrong, and
+  /// this lets the WIDGET say so. Without it a misconfigured endpoint renders
+  /// as an endless "Connecting…" with the reason available nowhere — which is
+  /// exactly how this landed as a bug report.
+  ///
+  /// [WidgetChatClient.suspendReason] is read on the same tick because an
+  /// error and the decision to give up arrive separately: the cap is reached
+  /// by the LAST of several failures, and only then does the client stop.
+  void _onProtocolError(ErrorPayload error) => emit(
+        state.copyWith(
+          lastError: error,
+          suspendReason: _client.suspendReason,
+        ),
+      );
+
   void _onTyping(TypingEvent event) =>
       emit(state.copyWith(isTyping: event.isTyping));
 
@@ -1572,6 +1592,7 @@ class ChatWidgetCubit extends Cubit<ChatWidgetState> {
     await _messagesSub.cancel();
     await _sessionsSub.cancel();
     await _typingSub.cancel();
+    await _errorsSub.cancel();
     return super.close();
   }
 }

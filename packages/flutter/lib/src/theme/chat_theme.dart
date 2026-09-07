@@ -11,6 +11,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../config/remote_config.dart';
+import 'header_style.dart';
 
 /// The seed colour when the merchant published none, or published something
 /// this file cannot parse.
@@ -68,13 +69,35 @@ ThemeData chatThemeData(RemoteConfig config, Brightness platformBrightness) {
     WidgetTheme.auto || null => platformBrightness,
   };
 
-  final ColorScheme scheme = ColorScheme.fromSeed(
-    // ColorScheme.fromSeed generates a full Material 3 tonal palette from
-    // one seed colour — the documented way to build a themed ColorScheme
-    // from a single brand colour rather than naming 40+ colours by hand.
-    // https://api.flutter.dev/flutter/material/ColorScheme/ColorScheme.fromSeed.html
-    seedColor: parseHexColor(config.accent) ?? kDefaultAccent,
+  final Color accent = parseHexColor(config.accent) ?? kDefaultAccent;
+
+  // ── The accent is used VERBATIM, and fromSeed alone will not do that ─────
+  //
+  // `ColorScheme.fromSeed` builds a full Material 3 tonal palette, which is
+  // exactly what the surface/background/outline roles want — 40-odd colours
+  // nobody should name by hand. But it does NOT preserve the seed: M3 maps it
+  // into a harmonised tonal range, so `primary` comes back as roughly tone 40
+  // of the seed's HUE with its chroma clamped, not the seed itself. A merchant
+  // who published crimson `#e11d48` gets maroon; one who published a violet
+  // gets a pale lavender. Reported from a real tenant, not theorised.
+  //
+  // The reference does not transform the accent at all — `styles.ts:105` is
+  // `--dh-accent: ${cssColor(config.accent)}`, straight through — and a brand
+  // colour is the one value in this config a merchant will hold us to
+  // exactly. So the tonal palette is kept for everything derived, and the
+  // roles that ARE the brand colour are pinned back to what was published.
+  //
+  // `onPrimary` comes from `readableOn` (the port of `styles.ts`'s own
+  // helper) rather than from the palette, because a pinned `primary` and a
+  // generated `onPrimary` are computed against different colours — which is
+  // how you get unreadable text on a correct button.
+  final ColorScheme generated = ColorScheme.fromSeed(
+    seedColor: accent,
     brightness: brightness,
+  );
+  final ColorScheme scheme = generated.copyWith(
+    primary: accent,
+    onPrimary: readableOn(accent),
   );
 
   return ThemeData(

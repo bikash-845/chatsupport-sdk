@@ -45,6 +45,8 @@ class ChatWidgetState extends Equatable {
     this.muted = false,
     this.replyingTo,
     this.consentAgreed = false,
+    this.lastError,
+    this.suspendReason,
   });
 
   /// Starting point for a fresh [ChatWidgetCubit] — disconnected, the
@@ -379,6 +381,21 @@ class ChatWidgetState extends Equatable {
   /// whatever this says.
   final bool consentAgreed;
 
+  /// The most recent §6.5 protocol error, or null if none has arrived.
+  ///
+  /// Diagnostic, not fatal: the connection may well recover on the next
+  /// attempt, so this names what went wrong without asserting that anything
+  /// is over. [suspendReason] is the one that says the client gave up.
+  ///
+  /// It exists because it was missing, and the absence was expensive: a
+  /// client pointed at a misconfigured endpoint reconnected forever and the
+  /// widget layer had no way to learn why — `AUTH_INVALID` and a refused
+  /// protocol version both rendered as an endless "Connecting…".
+  final ErrorPayload? lastError;
+
+  /// Why the client stopped trying, or null while it is still trying.
+  final SuspendReason? suspendReason;
+
   ChatWidgetState copyWith({
     ConnectionState? connectionState,
     RemoteConfig? config,
@@ -425,6 +442,8 @@ class ChatWidgetState extends Equatable {
     // cleared by clearing the app's data — so `??` says everything it
     // needs to.
     bool? consentAgreed,
+    ErrorPayload? lastError,
+    SuspendReason? suspendReason,
   }) {
     return ChatWidgetState(
       connectionState: connectionState ?? this.connectionState,
@@ -460,6 +479,8 @@ class ChatWidgetState extends Equatable {
       muted: muted ?? this.muted,
       replyingTo: clearReplyingTo ? null : (replyingTo ?? this.replyingTo),
       consentAgreed: consentAgreed ?? this.consentAgreed,
+      lastError: lastError ?? this.lastError,
+      suspendReason: suspendReason ?? this.suspendReason,
     );
   }
 
@@ -492,5 +513,7 @@ class ChatWidgetState extends Equatable {
         muted,
         replyingTo,
         consentAgreed,
+        lastError,
+        suspendReason,
       ];
 }

@@ -63,6 +63,12 @@ class FakeWidgetChatClient implements WidgetChatClient {
       StreamController<SessionClosed>.broadcast();
   final StreamController<AgentEvent> _agentEvents =
       StreamController<AgentEvent>.broadcast();
+  final StreamController<ErrorPayload> _errors =
+      StreamController<ErrorPayload>.broadcast();
+
+  /// What `suspendReason` reports. Set by a test standing in for a client
+  /// that has given up.
+  SuspendReason? suspended;
   final List<String?> markReadCalls = <String?>[];
 
   /// How many outbound typing signals went out.
@@ -107,6 +113,12 @@ class FakeWidgetChatClient implements WidgetChatClient {
 
   @override
   Stream<AgentEvent> get agentEvents => _agentEvents.stream;
+
+  @override
+  Stream<ErrorPayload> get errors => _errors.stream;
+
+  @override
+  SuspendReason? get suspendReason => suspended;
 
   @override
   ChatMessage sendMessage(
@@ -203,9 +215,13 @@ class FakeWidgetChatClient implements WidgetChatClient {
   /// this cannot say which of the two it was.
   void emitAgentEvent(AgentEvent event) => _agentEvents.add(event);
 
+  /// One §6.5 protocol error, as `ChatClient.errors` emits.
+  void emitError(ErrorPayload error) => _errors.add(error);
+
   Future<void> dispose() async {
     await _sessionClosed.close();
     await _agentEvents.close();
+    await _errors.close();
     await _reconnecting.close();
     await _connectionStates.close();
     await _messages.close();

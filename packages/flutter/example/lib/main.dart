@@ -30,11 +30,12 @@ library;
 
 import 'dart:async';
 
-import 'package:dhaam_chat/dhaam_chat.dart' show ChatClient;
+import 'package:dhaam_chat/dhaam_chat.dart' show ChatClient, ErrorPayload;
 import 'package:dhaam_chat_flutter/dhaam_chat_flutter.dart'
     show
         ChatClientAdapter,
         ChatWidget,
+        ChatWidgetState,
         ChatWidgetCubit,
         RemoteConfig,
         defaultRemoteConfig,
@@ -44,6 +45,7 @@ import 'package:dhaam_chat_flutter/dhaam_chat_flutter.dart'
 import 'package:dhaam_chat_rest/dhaam_chat_rest.dart'
     show RestClient, RestContactInfo, captureContactInfo;
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'example_config.dart';
 import 'rest_session_actions.dart';
@@ -515,12 +517,62 @@ class _ChatPanelPageState extends State<_ChatPanelPage> {
     // No Scaffold and no AppBar around it: `ChatWidget` builds its own, and
     // wrapping it in a second one would put two app bars on the screen the
     // moment it drills into a conversation.
-    return ChatWidget(
-      // The package builds its own when a host passes none, so this changes
-      // no behaviour — it is here because the seam exists and a host is the
-      // party that would replace the sound. See seams.dart.
-      chime: _chime,
-      cubit: _cubit,
+    // A developer-facing strip over the widget, not part of the SDK's own UI.
+    //
+    // The package deliberately does NOT put protocol errors in front of a
+    // customer — "AUTH_INVALID" means nothing to someone who wants to ask
+    // about their order. But an integrator pointing the SDK at a new endpoint
+    // needs exactly that string, and its absence is what turned a one-line
+    // misconfiguration into an afternoon: the client reconnects forever and
+    // every cause renders identically as "Connecting…".
+    return Stack(
+      children: <Widget>[
+        ChatWidget(
+          // The package builds its own when a host passes none, so this
+          // changes no behaviour — it is here because the seam exists and a
+          // host is the party that would replace the sound. See seams.dart.
+          chime: _chime,
+          cubit: _cubit,
+        ),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: BlocBuilder<ChatWidgetCubit, ChatWidgetState>(
+            bloc: _cubit,
+            builder: (BuildContext context, ChatWidgetState state) {
+              final ErrorPayload? error = state.lastError;
+              if (error == null) return const SizedBox.shrink();
+              final bool gaveUp = state.suspendReason != null;
+              return Material(
+                color:
+                    gaveUp ? const Color(0xFF7F1D1D) : const Color(0xFF78350F),
+                child: SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Text(
+                      gaveUp
+                          // Naming the reason separately matters: an exhausted
+                          // auth cap and a refused protocol version are both
+                          // terminal and want different fixes.
+                          ? 'GAVE UP (${state.suspendReason!.name}) — '
+                              '${error.code.name}: ${error.message}'
+                          : '${error.code.name}: ${error.message}'
+                              '${error.retryable ? " (retrying)" : ""}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
