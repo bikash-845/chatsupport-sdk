@@ -131,6 +131,32 @@ export type {
 export type { IdentityProfile, IdentitySync } from './identity/index.js';
 
 // ---------------------------------------------------------------------------
+// conversation/ — the KEYLESS (staff/party) surface: a merchant, a manager or
+// an admin observer, holding a dh-auth id_token and no publishable key.
+//
+// A separate factory rather than a widened `ChatClientConfig`, deliberately:
+// `publishableKey: process.env.PK` evaluating to `undefined` must not silently
+// become a keyless staff connection, which is the hole `validate.ts` closed on
+// the wire and that widening the customer config would reopen one layer up.
+// `createChatClient` and `ChatClientConfig` are untouched by any of this.
+//
+// Three runtime names on the hand-typed allowlist in
+// test/invariants/public-barrel-surface.test.ts: the factory, and the two
+// errors `open()` and `sendMessage()` reject with — both of which a caller is
+// expected to catch and branch on, so both have to be `instanceof`-checkable.
+// ---------------------------------------------------------------------------
+
+export { createConversationClient } from './conversation/index.js';
+export { ConversationJoinError, ConversationNotOpenError } from './conversation/index.js';
+export type {
+  ConversationClient,
+  ConversationClientConfig,
+  ConversationJoinFailure,
+  ConversationLogger,
+  ConversationsState,
+} from './conversation/index.js';
+
+// ---------------------------------------------------------------------------
 // state/ — the observable surface (§6.4) and event catalog (§6.5).
 // ---------------------------------------------------------------------------
 

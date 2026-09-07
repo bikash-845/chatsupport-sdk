@@ -1,0 +1,153 @@
+/* Deliberately plain — this is a reference integration, not a product UI. The
+   point is that you can read the page and see what the SDK is doing. */
+
+:root {
+  --fg: #14171a;
+  --muted: #5b6570;
+  --line: #d8dee4;
+  --bg: #ffffff;
+  --panel: #f6f8fa;
+  --accent: #0b5fff;
+  --danger: #b3261e;
+  --danger-bg: #fdecea;
+  --warn-bg: #fff5e0;
+  --warn-line: #d9a400;
+  --ok: #1a7f37;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 1.5rem;
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+.app-header h1 { font-size: 1.25rem; margin: 0 0 0.25rem; }
+.subtitle { margin: 0 0 1.25rem; color: var(--muted); font-size: 0.9rem; max-width: 60rem; }
+
+.layout {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 76rem;
+}
+@media (min-width: 62rem) {
+  .layout { grid-template-columns: 24rem minmax(0, 1fr); align-items: start; }
+}
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+  background: var(--panel);
+}
+.panel h2 {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 0.75rem;
+}
+.log-panel { margin-top: 1.25rem; max-width: 76rem; }
+
+label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  margin: 0.75rem 0 0.25rem;
+}
+input[type="text"], textarea {
+  width: 100%;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--fg);
+}
+textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+.hint { margin: 0.3rem 0 0; font-size: 0.75rem; color: var(--muted); }
+
+.row { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.75rem; }
+.row input[type="text"] { flex: 1 1 auto; }
+
+button {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+button[disabled] { opacity: 0.45; cursor: not-allowed; }
+button[type="button"]:not(.link) { background: var(--bg); color: var(--accent); }
+button.link {
+  border: 0; background: none; color: var(--accent);
+  padding: 0; font-size: inherit; text-decoration: underline; cursor: pointer;
+}
+
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.2rem 0.75rem; margin: 1rem 0 0; font-size: 0.82rem; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.state-idle, .state-closed { color: var(--muted); }
+.state-connecting, .state-authenticating, .state-reconnecting { color: var(--warn-line); }
+.state-connected { color: var(--ok); font-weight: 600; }
+.state-suspended { color: var(--danger); font-weight: 600; }
+
+.banner {
+  margin-top: 1rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 5px;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+}
+.banner-error { background: var(--danger-bg); border: 1px solid var(--danger); color: var(--danger); }
+.banner-stub {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
+  color: #6b4e00;
+  max-width: 76rem;
+  margin: 0 0 1.25rem;
+}
+
+.queue { margin-top: 0.6rem; font-size: 0.8rem; }
+.queue button { display: block; width: 100%; text-align: left; margin-bottom: 0.25rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; }
+
+.messages {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0.5rem;
+  min-height: 12rem;
+  max-height: 26rem;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg);
+}
+.messages li { padding: 0.35rem 0.1rem; border-bottom: 1px solid #eef1f4; font-size: 0.85rem; }
+.messages li:last-child { border-bottom: 0; }
+.messages .who { font-weight: 600; font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.messages .pending { color: var(--muted); font-style: italic; font-size: 0.72rem; }
+.messages .empty { color: var(--muted); font-style: italic; border: 0; }
+
+.log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 18rem;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+}
+.log li { padding: 0.15rem 0; border-bottom: 1px solid #eef1f4; }
+.log .lvl { display: inline-block; min-width: 3.5rem; color: var(--muted); }
+.log .lvl-warn { color: var(--warn-line); }
+.log .lvl-error { color: var(--danger); }
+.log .lvl-panel { color: var(--accent); }

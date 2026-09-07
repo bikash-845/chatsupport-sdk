@@ -48,6 +48,22 @@ import * as core from '../../src/index.js';
 const PUBLIC_SURFACE: readonly string[] = [
   // §6.1 construction.
   'createChatClient',
+  // The KEYLESS (staff/party) surface's construction. A DELIBERATE API
+  // commitment, and a separate factory on purpose: widening
+  // `ChatClientConfig.publishableKey` to optional would let
+  // `publishableKey: process.env.PK` evaluating to `undefined` silently become
+  // a keyless staff connection. This name is the whole runtime addition — the
+  // rest of that surface (`ConversationClient`, `ConversationClientConfig`,
+  // `ConversationsState`) is type-only and invisible to `Object.keys`.
+  'createConversationClient',
+  // The two failures the KEYLESS surface's operations reject with. Both are
+  // here for the same reason `ConnectionAbortedError` is: a caller is expected
+  // to CATCH them and branch, which needs `instanceof`, which needs the class
+  // itself to be public. `ConversationJoinError` carries a structured `reason`
+  // and the server's §7.4 `code`; `ConversationNotOpenError` names the
+  // conversation that was not open.
+  'ConversationJoinError',
+  'ConversationNotOpenError',
   // Errors a consumer is expected to catch.
   'ChatClientConfigError',
   'ConnectionAbortedError',
