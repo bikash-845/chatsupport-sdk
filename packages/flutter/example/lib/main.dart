@@ -422,9 +422,24 @@ class _HostHomePageState extends State<_HostHomePage> {
                 )
               else ...<Widget>[
                 const _Fact('GET /widget/config', 'loaded'),
-                _Fact('Uploads enabled', '${_config!.fileUploads}'),
                 _Fact('Sound enabled', '${_config!.sound}'),
               ],
+              // Outside the branch above, and always shown, because this is
+              // the row somebody comes looking for. "The paperclip is
+              // missing" was reported as a broken attachment seam; the seam
+              // is wired, and `RemoteConfig.fileUploads` is the merchant
+              // switch that governs whether the button is drawn at all. A
+              // value only visible once the fetch succeeds is invisible in
+              // exactly the case worth naming.
+              _Fact(
+                'Uploads enabled (paperclip)',
+                _configSettled
+                    ? '${(_config ?? defaultRemoteConfig).fileUploads}'
+                          '${_config == null ? " (defaultRemoteConfig — the "
+                              "fetch got no answer)" : " (published)"}'
+                    : 'not settled — Composer.fileUploads defaults to false '
+                        'until it is, so a paperclip may appear a moment late',
+              ),
             ],
           ),
           _Section(

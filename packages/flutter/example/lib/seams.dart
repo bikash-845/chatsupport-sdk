@@ -239,9 +239,12 @@ const List<SeamReport> seamReports = <SeamReport>[
     wiring: SeamWiring.wired,
     detail:
         'file_picker plus RestClient POST /upload, passed to ChatWidgetCubit. '
-        'The composer grows a paperclip when the merchant has fileUploads on; '
         'ConversationScreen builds one AttachmentDraftController per composer '
-        'from these two seams.',
+        'from these two seams — a host does NOT build one, because a draft is '
+        'one composer’s pending file and dies with it. If the paperclip is '
+        'missing with this row green, the gate is RemoteConfig.fileUploads: '
+        'see “Uploads enabled” above, which is the merchant’s switch and not '
+        'a seam anyone here can fill.',
   ),
   SeamReport(
     name: 'VoiceDevice',
