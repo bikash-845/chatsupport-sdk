@@ -36,6 +36,8 @@ import 'package:dhaam_chat_flutter/dhaam_chat_flutter.dart'
     show
         ChatClientAdapter,
         ChatIdentity,
+        ChatSessionSummary,
+        SessionListRefresher,
         ChatWidget,
         ChatWidgetState,
         ChatWidgetCubit,
@@ -53,6 +55,7 @@ import 'example_config.dart';
 import 'example_identity.dart';
 import 'rest_session_actions.dart';
 import 'seams.dart';
+import 'session_list.dart';
 import 'token_shape.dart';
 
 void main() {
@@ -214,7 +217,6 @@ class _HostHomePage extends StatefulWidget {
 
 class _HostHomePageState extends State<_HostHomePage> {
   late final RestClient _rest;
-  late final RestSessionActions _sessionActions;
 
   /// The merchant's published appearance, or null until the fetch settles.
   ///
@@ -248,7 +250,6 @@ class _HostHomePageState extends State<_HostHomePage> {
       publishableKey: widget.config.publishableKey,
       getAccessToken: exampleTokenProvider(widget.config.accessToken),
     );
-    _sessionActions = RestSessionActions(_rest);
 
     _loadRemoteConfig();
     _captureContactInfo();
@@ -313,17 +314,14 @@ class _HostHomePageState extends State<_HostHomePage> {
         builder: (BuildContext context) => _ChatPanelPage(
           config: widget.config,
           initialConfig: _config ?? defaultRemoteConfig,
-          sessionActions: _sessionActions,
           // Read at PUSH time, not captured when this state was built, so the
           // switch above governs the panel about to open rather than the one
           // the app happened to start with.
           identity: exampleIdentity(_visitor),
-          // The same client the session actions were built from, threaded
-          // down the same way and for the same reason: three more seams — the
-          // issue reporter, the attachment uploader, and the transcript
-          // emailer behind them — are `RestClient` calls the panel wires, and
-          // a second client here would open a second connection pool to talk
-          // to the one endpoint.
+          // Everything REST the panel wires hangs off this one client: the
+          // session actions, the issue reporter, the attachment uploader and
+          // the session-list fetch. A second client here would open a second
+          // connection pool to talk to the one endpoint.
           rest: _rest,
         ),
       ),
@@ -468,14 +466,12 @@ class _ChatPanelPage extends StatefulWidget {
   const _ChatPanelPage({
     required this.config,
     required this.initialConfig,
-    required this.sessionActions,
     required this.identity,
     required this.rest,
   });
 
   final ExampleConfigReady config;
   final RemoteConfig initialConfig;
-  final RestSessionActions sessionActions;
 
   /// Who the host says this visitor is. See `example_identity.dart` — the
   /// profile inside it is the single thing that decides whether the pre-chat
@@ -505,6 +501,26 @@ class _ChatPanelPageState extends State<_ChatPanelPage> {
   /// re-announce or go silent depending on which way the count moved.
   final Chime _chime = exampleChime();
 
+  /// The session-list fetch, serialised.
+  ///
+  /// Owned by the PANEL and not by the host screen, because it writes into
+  /// this Cubit: `dispose` is what stops a page landing in a state layer that
+  /// has been torn down, which is the refresher's own documented reason for
+  /// having one.
+  late final SessionListRefresher _sessions;
+
+  /// The four methods the end-of-conversation surfaces need, plus the hook
+  /// that refreshes the list when one of them lands. Built here rather than
+  /// on the host screen for the same reason [_sessions] is: the hook it
+  /// carries drives an object that dies with this route.
+  late final RestSessionActions _sessionActions;
+
+  /// What the last settled fetch was, for the developer strip.
+  ExampleSessionListView _sessionsView = ExampleSessionListView.pending;
+
+  /// The last fetch failure, if the most recent one failed.
+  String? _sessionsError;
+
   @override
   void initState() {
     super.initState();
@@ -518,6 +534,48 @@ class _ChatPanelPageState extends State<_ChatPanelPage> {
       // site — orchestrator decision D1, visible here as one argument passed
       // twice rather than two callbacks kept in step.
       getToken: exampleTokenProvider(widget.config.accessToken),
+    );
+
+    // Built before the Cubit because the Cubit takes the actions, and the
+    // actions take the refresh hook. `late final _sessions` is what lets the
+    // hook name the refresher it is being wired into — safe because nothing
+    // fires during construction.
+    _sessions = exampleSessionListRefresher(
+      rest: widget.rest,
+      onSessions: (List<ChatSessionSummary> sessions) {
+        if (!mounted) return;
+        // The write the reported bug was missing. `dhaam_chat` cannot list
+        // sessions, so this is the only way the Messages screen is ever
+        // given anything to draw.
+        _cubit.updateSessionSummaries(sessions);
+        setState(() {
+          // An empty page is a SUCCESS and is the guest signal — never an
+          // error, and never a reason to keep saying "loading". Reporting it
+          // as a failure is the mistake `listSessions` documents at length,
+          // because it makes "not identified" indistinguishable from "the
+          // lookup failed".
+          _sessionsView = sessions.isEmpty
+              ? ExampleSessionListView.empty
+              : ExampleSessionListView.loaded;
+          _sessionsError = null;
+        });
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (!mounted) return;
+        setState(() {
+          _sessionsView = ExampleSessionListView.failed;
+          _sessionsError = describeSessionListError(error);
+        });
+      },
+    );
+
+    _sessionActions = RestSessionActions(
+      widget.rest,
+      // A close or a reopen changes a row the picker is already showing, and
+      // nothing else tells it so. Asking DURING a flight is not dropped —
+      // the refresher re-issues once the flight lands, and a burst collapses
+      // into one re-issue.
+      onSessionChanged: () => unawaited(_sessions.refresh()),
     );
 
     _cubit = ChatWidgetCubit(
@@ -537,7 +595,7 @@ class _ChatPanelPageState extends State<_ChatPanelPage> {
       // OFF, not broken: no rating card, no ended footer, no way to end a
       // conversation — which is the correct outcome for a host that wired no
       // REST, and the wrong one for this app, which has one.
-      sessionActions: widget.sessionActions,
+      sessionActions: _sessionActions,
       // The raw `POST /chat/sessions/{id}/report-issue` route. Absent means
       // the ⋯ menu drops the row entirely rather than offering one that
       // quietly does nothing — so without this line the report form T14
@@ -562,6 +620,10 @@ class _ChatPanelPageState extends State<_ChatPanelPage> {
         () => _cubit.state.session?.sessionId ?? '',
       ),
     );
+
+    // The panel-open fetch — the first of the two asks the refresher exists
+    // to serialise. After the Cubit, because `onSessions` writes into it.
+    unawaited(_sessions.refresh());
   }
 
   @override
@@ -572,9 +634,43 @@ class _ChatPanelPageState extends State<_ChatPanelPage> {
     //
     // Order matters: the Cubit holds subscriptions to the client's streams, so
     // it is closed before the client that feeds them.
+    // Before the Cubit it writes into: a page landing after `close()` would
+    // be an emit on a closed Cubit. Disposal does not cancel a fetch already
+    // out — `SessionListFetch` is a plain future and this did not open the
+    // connection — so the answer is dropped on arrival instead.
+    _sessions.dispose();
     _cubit.close();
     unawaited(_client.dispose());
     super.dispose();
+  }
+
+  /// What the strip says about the session list, or null when there is
+  /// nothing worth saying.
+  ///
+  /// Silent on [ExampleSessionListView.loaded]: rows are on screen and the
+  /// list is speaking for itself. The other three all get a line, because
+  /// each is a state somebody would otherwise misread — an empty picker in
+  /// particular reads as "this is still broken" when it is the correct answer
+  /// for a visitor with no conversations of their own.
+  String? _sessionListLine(ChatWidgetState state) {
+    switch (_sessionsView) {
+      case ExampleSessionListView.loaded:
+        return null;
+      case ExampleSessionListView.pending:
+        return 'sessions: GET /chat/sessions/customer '
+            '(limit $kExampleSessionLimit) in flight…';
+      case ExampleSessionListView.empty:
+        // Named as success in the first four words, because the whole reason
+        // the adapter refuses to raise here is that a guest's empty page and
+        // a failed lookup are different facts.
+        return 'sessions: 0 — an ordinary 200 with an empty page, not an '
+            'error. This IS the guest signal'
+            '${state.isGuest ? "" : ", though this visitor is identified: "
+                "the server has no conversations for them yet"}.';
+      case ExampleSessionListView.failed:
+        return 'sessions: fetch failed — the previous page is still on '
+            'screen.\n${_sessionsError ?? ""}';
+    }
   }
 
   @override
@@ -607,18 +703,31 @@ class _ChatPanelPageState extends State<_ChatPanelPage> {
             bloc: _cubit,
             builder: (BuildContext context, ChatWidgetState state) {
               final ErrorPayload? error = state.lastError;
-              if (error == null) return const SizedBox.shrink();
+              final String? sessions = _sessionListLine(state);
+              if (error == null && sessions == null) {
+                return const SizedBox.shrink();
+              }
               final bool gaveUp = state.suspendReason != null;
               return Material(
-                color:
-                    gaveUp ? const Color(0xFF7F1D1D) : const Color(0xFF78350F),
+                color: error == null
+                    // A session-list note on its own is not a failure — an
+                    // empty page is the commonest thing it says, and an empty
+                    // page is what a guest correctly gets.
+                    ? const Color(0xFF1E3A5F)
+                    : gaveUp
+                        ? const Color(0xFF7F1D1D)
+                        : const Color(0xFF78350F),
                 child: SafeArea(
                   top: false,
                   child: Padding(
                     padding: const EdgeInsets.all(8),
                     child: Text(
-                      _errorLine(state, error, gaveUp: gaveUp),
-                      maxLines: 12,
+                      <String>[
+                        if (error != null)
+                          _errorLine(state, error, gaveUp: gaveUp),
+                        if (sessions != null) sessions,
+                      ].join('\n\n'),
+                      maxLines: 16,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 12,

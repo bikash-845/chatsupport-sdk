@@ -36,12 +36,33 @@ class RestSessionActions implements ChatSessionActions {
   /// would allocate for nothing — but the real reason to name it here is that
   /// it is the one method of the four with a RULE in it, and having exactly
   /// one instance of that rule per client is the property worth pinning.
-  RestSessionActions(RestClient rest)
+  RestSessionActions(RestClient rest, {this.onSessionChanged})
       : _rest = rest,
         _readCsat = csatLookupOver(rest);
 
   final RestClient _rest;
   final CsatLookupFn _readCsat;
+
+  /// Fired after a close or a reopen has actually applied.
+  ///
+  /// ── Why the session list is refreshed from HERE ────────────────────────
+  ///
+  /// Closing a conversation changes a row the picker is already showing, and
+  /// nothing tells the picker so: the list is a REST page, not a live
+  /// projection, and `session.closed` arrives on the socket for the session
+  /// the widget has open rather than as a new page. Without this hook the
+  /// customer ends a conversation and watches its row go on reading "With an
+  /// agent" until the panel is closed and reopened.
+  ///
+  /// This is the second of the two asks `SessionListRefresher` was built to
+  /// serialise — the panel-open fetch is the first — and firing it here is
+  /// what makes the collapsing behaviour its header describes reachable at
+  /// all.
+  ///
+  /// Optional, because the interface it fills does not require it: a host
+  /// that renders no picker wires nothing and these methods stay four plain
+  /// delegations.
+  final void Function()? onSessionChanged;
 
   /// `GET …/csat`, through `csatLookupOver`.
   ///
@@ -83,7 +104,16 @@ class RestSessionActions implements ChatSessionActions {
   /// closed" SYSTEM message and another Kafka event, in the customer's own
   /// transcript. It belongs to whoever can decide, which is the caller.
   @override
-  Future<void> closeSession(String sessionId) => _rest.closeSession(sessionId);
+  Future<void> closeSession(String sessionId) async {
+    await _rest.closeSession(sessionId);
+    // AFTER the await, so a close that threw does not announce a change that
+    // did not happen. A `RestSessionReadBackException` is the one case where
+    // it did happen and is deliberately still not announced here: it escapes
+    // to the caller who has to decide (see this method's doc), and a refresh
+    // scheduled on the way past would be this class quietly deciding the
+    // close counted.
+    onSessionChanged?.call();
+  }
 
   /// `POST …/reopen`, answering with the SETTLED id.
   ///
@@ -97,6 +127,11 @@ class RestSessionActions implements ChatSessionActions {
   @override
   Future<String> reopenSession(String sessionId) async {
     final RestChatSession settled = await _rest.reopenSession(sessionId);
+    // Same placement and same reason as [closeSession]'s. A reopen may also
+    // have converged onto a DIFFERENT session than the one asked for, which
+    // is a second row the picker is now wrong about — so the refresh matters
+    // here for one more reason than it does there.
+    onSessionChanged?.call();
     return settled.id;
   }
 }

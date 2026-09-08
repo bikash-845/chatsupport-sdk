@@ -30,6 +30,13 @@
 /// row nobody rechecks reads as a missing feature rather than as a missing
 /// line in an example.
 ///
+/// The session list was a third case, and a different one again: the seam is
+/// `ChatWidgetCubit.updateSessionSummaries`, and nothing called it, so the
+/// Messages screen was empty on every run. That fetch does not live in this
+/// file because it is not a closure the package takes — it is a page a host
+/// goes and gets. It lives in `session_list.dart`, and the panel below it
+/// reports on it.
+///
 /// [exampleAttachmentDraft] was in that list for a real reason and no longer
 /// is — not
 /// because it is now passed, but because the shape it demonstrated was
@@ -253,6 +260,17 @@ const List<SeamReport> seamReports = <SeamReport>[
         'restIssueReporter over POST /chat/sessions/{id}/report-issue, passed '
         'to ChatWidgetCubit(issueReporter:). Without it the header menu drops '
         'the Report row entirely rather than offering a dead one.',
+  ),
+  SeamReport(
+    name: 'Session list (updateSessionSummaries)',
+    wiring: SeamWiring.wired,
+    detail:
+        'dhaam_chat_rest listSessions, mapped and pushed through '
+        'ChatWidgetCubit.updateSessionSummaries by a SessionListRefresher — '
+        'see session_list.dart. The Cubit cannot populate this itself: '
+        'dhaam_chat has no HTTP layer and cannot list sessions at all, so a '
+        'host that renders nothing here has a Messages screen with nothing to '
+        'draw. An empty page is ordinary success and is the guest signal.',
   ),
   SeamReport(
     name: 'ChimePlayer',
