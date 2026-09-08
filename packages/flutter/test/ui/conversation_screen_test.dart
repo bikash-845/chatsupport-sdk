@@ -338,16 +338,19 @@ void main() {
     cubit.openConversation('past-session-1');
     await tester.pumpWidget(_wrap(cubit));
 
-    expect(find.text('…'), findsNothing);
+    // By TYPE, not by the text it used to hold: the row is three animated
+    // dots now, and a `find.text('…')` would go quietly green again the day
+    // somebody put a static ellipsis back.
+    expect(find.byType(TypingIndicator), findsNothing);
     client.emitTyping(true);
     await flush(tester);
     await tester.pump();
-    expect(find.text('…'), findsOneWidget);
+    expect(find.byType(TypingIndicator), findsOneWidget);
 
     client.emitTyping(false);
     await flush(tester);
     await tester.pump();
-    expect(find.text('…'), findsNothing);
+    expect(find.byType(TypingIndicator), findsNothing);
   });
 
   testWidgets('the composer is present and sends through the Cubit',

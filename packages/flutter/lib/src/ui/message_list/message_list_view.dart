@@ -14,11 +14,13 @@ import 'package:flutter/semantics.dart';
 import '../quick_replies.dart';
 import 'linkified_text.dart';
 import 'message_actions.dart';
+import 'message_avatar.dart';
 import 'message_list_presenter.dart';
 import 'message_row.dart';
 import 'reply_quote.dart';
 import 'scroll_anchor.dart';
 import 'tick_state.dart';
+import 'typing_indicator.dart';
 
 /// Everything the transcript hands back to its host.
 class MessageListCallbacks {
@@ -93,6 +95,13 @@ class MessageListView extends StatefulWidget {
   @override
   State<MessageListView> createState() => _MessageListViewState();
 }
+
+/// The typing row's slot in the sliver.
+///
+/// Deliberately NOT a `ValueKey<String>`: `findChildIndexCallback` reads
+/// those as message ids, and a message whose id happened to match would
+/// silently claim the typing row's position.
+const Key _typingRowKey = ValueKey<Type>(TypingIndicator);
 
 class _MessageListViewState extends State<MessageListView> {
   final ScrollController _scroll = ScrollController();
@@ -169,10 +178,24 @@ class _MessageListViewState extends State<MessageListView> {
       _indexById[render.rows[i].message.id] = i;
     }
 
+    // The typing bubble is the LAST item of the transcript, not a band
+    // below it — `message-list.ts` appends its node to `log`, the element
+    // that scrolls, and says why: it has to read as "someone is composing
+    // the next message", not as an interruption in the middle of history.
+    //
+    // Being inside the sliver is also what puts it under the near-bottom
+    // rule. Outside it, the row grew the COLUMN rather than the scrollable,
+    // so `maxScrollExtent` never moved and following the transcript down
+    // could not reach it; a customer sitting at the bottom watched the
+    // bubble appear underneath the message they were reading instead of
+    // after it.
+    final bool typing = widget.inputs.isTyping;
+    final int itemCount = render.rows.length + (typing ? 1 : 0);
+
     return Column(
       children: <Widget>[
         Expanded(
-          child: render.rows.isEmpty
+          child: itemCount == 0
               ? _EmptyTranscript(show: render.showEmptyState)
               : Semantics(
                   container: true,
@@ -183,7 +206,7 @@ class _MessageListViewState extends State<MessageListView> {
                       horizontal: 12,
                       vertical: 8,
                     ),
-                    itemCount: render.rows.length,
+                    itemCount: itemCount,
                     // What makes the keys below actually reuse an element
                     // across an insertion. A sliver matches children by
                     // INDEX unless it is told where a key moved to, so
@@ -192,11 +215,29 @@ class _MessageListViewState extends State<MessageListView> {
                     // right state either, and an open menu would still shut
                     // the moment a message landed above it.
                     findChildIndexCallback: (Key key) {
+                      // The typing row answers too, and has to: it is the
+                      // one child whose index moves on every arrival, and a
+                      // `null` here would rebuild it from scratch — which
+                      // restarts its dots mid-bounce every time a message
+                      // lands.
+                      if (key == _typingRowKey) {
+                        return typing ? render.rows.length : null;
+                      }
                       final String? id =
                           key is ValueKey<String> ? key.value : null;
                       return id == null ? null : _indexById[id];
                     },
                     itemBuilder: (BuildContext context, int index) {
+                      if (index == render.rows.length) {
+                        return Padding(
+                          key: _typingRowKey,
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: TypingIndicator(
+                            label: render.typingLabel,
+                            avatarLetter: render.typingAvatarLetter,
+                          ),
+                        );
+                      }
                       final MessageRow row = render.rows[index];
                       return Padding(
                         // Keyed by message id, the way `message-list.ts`
@@ -216,7 +257,6 @@ class _MessageListViewState extends State<MessageListView> {
                   ),
                 ),
         ),
-        if (widget.inputs.isTyping) _TypingRow(label: render.typingLabel),
         if (render.quickReplies.isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
@@ -325,48 +365,6 @@ class MessageBubbleRow extends StatelessWidget {
                   ),
         ),
       ],
-    );
-  }
-}
-
-/// The per-row identity disc.
-///
-/// Deliberately NOT the header avatar's content: that disc's letters come
-/// from the merchant's configured initials, which name the BRAND rather than
-/// whoever sent this particular message. The letter here always comes from
-/// the resolved sender name — the same resolution the visible author heading
-/// uses.
-///
-/// Hidden from assistive tech: a screen reader already gets this message's
-/// sender from the author heading on the first bubble of a run, and gets
-/// nothing extra for a later bubble — same as a sighted reader, who has only
-/// the earlier heading and the alignment to go on. This disc is a
-/// sighted-only convenience on top of that rule, not a new source of truth.
-class MessageAvatar extends StatelessWidget {
-  const MessageAvatar({super.key, required this.letter});
-
-  final String letter;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    return ExcludeSemantics(
-      child: Container(
-        width: 24,
-        height: 24,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: scheme.primaryContainer,
-          shape: BoxShape.circle,
-        ),
-        child: Text(
-          letter,
-          style: Theme.of(context)
-              .textTheme
-              .labelSmall
-              ?.copyWith(color: scheme.onPrimaryContainer),
-        ),
-      ),
     );
   }
 }
@@ -525,47 +523,6 @@ class _EmptyTranscript extends StatelessWidget {
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
-        ),
-      ),
-    );
-  }
-}
-
-/// The typing bubble. Deliberately not a live region: a typing indicator
-/// that announces itself interrupts the message the user is actually
-/// reading, and it can flap several times a second. The label is the only
-/// channel that can say WHO — it used to be the fixed word "Agent", which
-/// named a human on a session being handled by the bot.
-class _TypingRow extends StatelessWidget {
-  const _TypingRow({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Semantics(
-            label: label,
-            liveRegion: false,
-            // The three animated dots say SOMEONE is composing; this label
-            // is the only channel that can say who. Excluded rather than
-            // merged, so a screen reader reads the name and not an ellipsis.
-            excludeSemantics: true,
-            child: const SizedBox(
-              width: 24,
-              height: 12,
-              child: Center(child: Text('…')),
-            ),
-          ),
         ),
       ),
     );

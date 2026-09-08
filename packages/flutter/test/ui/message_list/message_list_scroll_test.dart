@@ -76,7 +76,15 @@ void main() {
     MessageListInputs inputs,
   ) async {
     await tester.pumpWidget(_Harness(inputs: inputs));
-    await tester.pumpAndSettle();
+    if (inputs.isTyping) {
+      // The typing dots loop by design, so `pumpAndSettle` — which pumps
+      // until no frame is scheduled — never returns on a frame that draws
+      // them. Two pumps: mount, then the post-frame callback mount queued.
+      await tester.pump();
+      await tester.pump();
+    } else {
+      await tester.pumpAndSettle();
+    }
     return tester.state<_HarnessState>(find.byType(_Harness));
   }
 
@@ -183,6 +191,165 @@ void main() {
       isTrue,
     );
     expect(find.text('message number 40'), findsOneWidget);
+  });
+
+  group('the typing bubble', () {
+    // It sits INSIDE the scrollable, after the last message. Outside it, the
+    // row grew the Column rather than the list, so `maxScrollExtent` never
+    // moved — which is what made these two assertions unwritable before.
+
+    testWidgets('appears as the last item of the transcript',
+        (WidgetTester tester) async {
+      final _HarnessState harness = await pump(
+        tester,
+        MessageListInputs(
+          messages: <ChatMessage>[for (int i = 0; i < 40; i += 1) _msg(i)],
+        ),
+      );
+      harness.supply(
+        MessageListInputs(
+          messages: <ChatMessage>[for (int i = 0; i < 40; i += 1) _msg(i)],
+          isTyping: true,
+        ),
+      );
+      // Not `pumpAndSettle`: the dots loop by design and no frame is ever
+      // the last one.
+      await tester.pump();
+      await tester.pump();
+
+      // INSIDE the scrollable, not beside it. A band bolted under the list
+      // also grows `maxScrollExtent` — it shrinks the viewport — so extent
+      // alone cannot tell the two apart; containment can.
+      expect(
+        find.descendant(
+          of: find.byType(Scrollable),
+          matching: find.byType(TypingIndicator),
+        ),
+        findsOneWidget,
+      );
+
+      // And after the last message, not before it: `message-list.ts` keeps
+      // the bubble last so it reads as the next message being written.
+      final double lastMessageBottom =
+          tester.getRect(find.text('message number 39')).bottom;
+      expect(
+        tester.getRect(find.byType(TypingIndicator)).top,
+        greaterThanOrEqualTo(lastMessageBottom),
+      );
+    });
+
+    testWidgets('does not drag a customer who had scrolled up',
+        (WidgetTester tester) async {
+      final _HarnessState harness = await pump(
+        tester,
+        MessageListInputs(
+          messages: <ChatMessage>[for (int i = 0; i < 40; i += 1) _msg(i)],
+        ),
+      );
+
+      // The customer scrolls up to re-read something.
+      await tester.drag(find.byType(ListView), const Offset(0, 600));
+      await tester.pumpAndSettle();
+      final ScrollableState afterDrag =
+          tester.state<ScrollableState>(find.byType(Scrollable));
+      final double readingAt = afterDrag.position.pixels;
+      final double extentBefore = afterDrag.position.maxScrollExtent;
+      expect(
+        isNearBottom(
+          pixels: readingAt,
+          maxScrollExtent: extentBefore,
+        ),
+        isFalse,
+      );
+
+      // An agent starts typing. Nothing about that is worth yanking a
+      // customer mid-sentence for.
+      harness.supply(
+        MessageListInputs(
+          messages: <ChatMessage>[for (int i = 0; i < 40; i += 1) _msg(i)],
+          isTyping: true,
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      final ScrollableState after =
+          tester.state<ScrollableState>(find.byType(Scrollable));
+      // The assertion the bug report is about: not one pixel of movement.
+      expect(after.position.pixels, readingAt);
+      // And not built at all, because it is below a viewport the customer
+      // scrolled away from — which a footer band bolted under the list
+      // could never be.
+      expect(find.byType(TypingIndicator), findsNothing);
+
+      // It IS in the transcript, though: scrolling back to the end reaches
+      // it. `extentBefore` is only used to prove the customer really had
+      // somewhere to scroll back to.
+      expect(extentBefore, greaterThan(readingAt));
+      after.position.jumpTo(after.position.maxScrollExtent);
+      await tester.pump();
+      expect(find.byType(TypingIndicator), findsOneWidget);
+    });
+
+    testWidgets('DOES follow a customer who was at the bottom',
+        (WidgetTester tester) async {
+      final _HarnessState harness = await pump(
+        tester,
+        MessageListInputs(
+          messages: <ChatMessage>[for (int i = 0; i < 40; i += 1) _msg(i)],
+        ),
+      );
+
+      harness.supply(
+        MessageListInputs(
+          messages: <ChatMessage>[for (int i = 0; i < 40; i += 1) _msg(i)],
+          isTyping: true,
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      final ScrollableState scrollable =
+          tester.state<ScrollableState>(find.byType(Scrollable));
+      expect(
+        isNearBottom(
+          pixels: scrollable.position.pixels,
+          maxScrollExtent: scrollable.position.maxScrollExtent,
+        ),
+        isTrue,
+      );
+    });
+
+    testWidgets('keeps its dots running across an arriving message',
+        (WidgetTester tester) async {
+      // Its index moves on every arrival. Without an answer from
+      // `findChildIndexCallback` the sliver rebuilds it from scratch and the
+      // bounce restarts — a visible stutter exactly when the transcript is
+      // busiest.
+      final _HarnessState harness = await pump(
+        tester,
+        MessageListInputs(
+          messages: <ChatMessage>[_msg(0)],
+          isTyping: true,
+        ),
+      );
+      final State<TypingDots> dots =
+          tester.state<State<TypingDots>>(find.byType(TypingDots));
+
+      harness.supply(
+        MessageListInputs(
+          messages: <ChatMessage>[_msg(0), _msg(1)],
+          isTyping: true,
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        tester.state<State<TypingDots>>(find.byType(TypingDots)),
+        same(dots),
+      );
+    });
   });
 
   testWidgets('an open action menu does not ride an insertion to another row',
