@@ -96,6 +96,13 @@ class MessageListView extends StatefulWidget {
   State<MessageListView> createState() => _MessageListViewState();
 }
 
+/// The typing row's slot in the sliver.
+///
+/// Deliberately NOT a `ValueKey<String>`: `findChildIndexCallback` reads
+/// those as message ids, and a message whose id happened to match would
+/// silently claim the typing row's position.
+const Key _typingRowKey = ValueKey<Type>(TypingIndicator);
+
 class _MessageListViewState extends State<MessageListView> {
   final ScrollController _scroll = ScrollController();
 
@@ -171,10 +178,24 @@ class _MessageListViewState extends State<MessageListView> {
       _indexById[render.rows[i].message.id] = i;
     }
 
+    // The typing bubble is the LAST item of the transcript, not a band
+    // below it — `message-list.ts` appends its node to `log`, the element
+    // that scrolls, and says why: it has to read as "someone is composing
+    // the next message", not as an interruption in the middle of history.
+    //
+    // Being inside the sliver is also what puts it under the near-bottom
+    // rule. Outside it, the row grew the COLUMN rather than the scrollable,
+    // so `maxScrollExtent` never moved and following the transcript down
+    // could not reach it; a customer sitting at the bottom watched the
+    // bubble appear underneath the message they were reading instead of
+    // after it.
+    final bool typing = widget.inputs.isTyping;
+    final int itemCount = render.rows.length + (typing ? 1 : 0);
+
     return Column(
       children: <Widget>[
         Expanded(
-          child: render.rows.isEmpty
+          child: itemCount == 0
               ? _EmptyTranscript(show: render.showEmptyState)
               : Semantics(
                   container: true,
@@ -185,7 +206,7 @@ class _MessageListViewState extends State<MessageListView> {
                       horizontal: 12,
                       vertical: 8,
                     ),
-                    itemCount: render.rows.length,
+                    itemCount: itemCount,
                     // What makes the keys below actually reuse an element
                     // across an insertion. A sliver matches children by
                     // INDEX unless it is told where a key moved to, so
@@ -194,11 +215,29 @@ class _MessageListViewState extends State<MessageListView> {
                     // right state either, and an open menu would still shut
                     // the moment a message landed above it.
                     findChildIndexCallback: (Key key) {
+                      // The typing row answers too, and has to: it is the
+                      // one child whose index moves on every arrival, and a
+                      // `null` here would rebuild it from scratch — which
+                      // restarts its dots mid-bounce every time a message
+                      // lands.
+                      if (key == _typingRowKey) {
+                        return typing ? render.rows.length : null;
+                      }
                       final String? id =
                           key is ValueKey<String> ? key.value : null;
                       return id == null ? null : _indexById[id];
                     },
                     itemBuilder: (BuildContext context, int index) {
+                      if (index == render.rows.length) {
+                        return Padding(
+                          key: _typingRowKey,
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: TypingIndicator(
+                            label: render.typingLabel,
+                            avatarLetter: render.typingAvatarLetter,
+                          ),
+                        );
+                      }
                       final MessageRow row = render.rows[index];
                       return Padding(
                         // Keyed by message id, the way `message-list.ts`
@@ -218,14 +257,6 @@ class _MessageListViewState extends State<MessageListView> {
                   ),
                 ),
         ),
-        if (widget.inputs.isTyping)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            child: TypingIndicator(
-              label: render.typingLabel,
-              avatarLetter: render.typingAvatarLetter,
-            ),
-          ),
         if (render.quickReplies.isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
