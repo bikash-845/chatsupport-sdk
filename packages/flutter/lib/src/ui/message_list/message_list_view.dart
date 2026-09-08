@@ -19,6 +19,7 @@ import 'message_row.dart';
 import 'reply_quote.dart';
 import 'scroll_anchor.dart';
 import 'tick_state.dart';
+import 'typing_indicator.dart';
 
 /// Everything the transcript hands back to its host.
 class MessageListCallbacks {
@@ -216,7 +217,14 @@ class _MessageListViewState extends State<MessageListView> {
                   ),
                 ),
         ),
-        if (widget.inputs.isTyping) _TypingRow(label: render.typingLabel),
+        if (widget.inputs.isTyping)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TypingIndicator(label: render.typingLabel),
+            ),
+          ),
         if (render.quickReplies.isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
@@ -525,47 +533,6 @@ class _EmptyTranscript extends StatelessWidget {
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
-        ),
-      ),
-    );
-  }
-}
-
-/// The typing bubble. Deliberately not a live region: a typing indicator
-/// that announces itself interrupts the message the user is actually
-/// reading, and it can flap several times a second. The label is the only
-/// channel that can say WHO — it used to be the fixed word "Agent", which
-/// named a human on a session being handled by the bot.
-class _TypingRow extends StatelessWidget {
-  const _TypingRow({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Semantics(
-            label: label,
-            liveRegion: false,
-            // The three animated dots say SOMEONE is composing; this label
-            // is the only channel that can say who. Excluded rather than
-            // merged, so a screen reader reads the name and not an ellipsis.
-            excludeSemantics: true,
-            child: const SizedBox(
-              width: 24,
-              height: 12,
-              child: Center(child: Text('…')),
-            ),
-          ),
         ),
       ),
     );

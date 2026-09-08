@@ -63,6 +63,10 @@ Future<_Recorder> _pump(
   WidgetTester tester,
   MessageListInputs inputs, {
   MessageListPresenter? presenter,
+  /// `false` for anything that renders the typing bubble. Its dots loop
+  /// forever by design, so `pumpAndSettle` — which pumps until no frame is
+  /// scheduled — never returns.
+  bool settle = true,
 }) async {
   final _Recorder recorder = _Recorder();
   await tester.pumpWidget(
@@ -79,7 +83,14 @@ Future<_Recorder> _pump(
       ),
     ),
   );
-  await tester.pumpAndSettle();
+  if (settle) {
+    await tester.pumpAndSettle();
+  } else {
+    // Two frames: the first mounts, the second runs the post-frame callback
+    // that mount scheduled (the scroll anchor and the announcement).
+    await tester.pump();
+    await tester.pump();
+  }
   return recorder;
 }
 
@@ -345,6 +356,7 @@ void main() {
           ),
         ),
       ),
+      settle: false,
     );
     expect(
       find.byWidgetPredicate(
