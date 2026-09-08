@@ -489,6 +489,76 @@ void main() {
       );
       expect(fallback.typingLabel, 'Agent is typing');
     });
+
+    test('the typing avatar takes its letter from the same handler', () {
+      // One derivation, not two. A disc fed from `session.assignedAgent`
+      // while the label came from `handledBy` would put the agent's initial
+      // beside the bot's name for as long as both are resolvable.
+      final MessageListRender render = MessageListPresenter().present(
+        _inputs(
+          messages: const <ChatMessage>[],
+          session: _session(
+            handledBy: const HandledBy(
+              kind: HandledByKind.bot,
+              id: 'bot_1',
+              displayName: 'Kai',
+            ),
+          ),
+        ),
+      );
+      expect(render.typingLabel, 'Kai is typing');
+      expect(render.typingAvatarLetter, 'K');
+
+      // The generic fallback still gets a disc — 'Agent' is a name for this
+      // purpose, and a bubble that loses its disc at that moment jumps left.
+      expect(
+        MessageListPresenter()
+            .present(_inputs(messages: const <ChatMessage>[]))
+            .typingAvatarLetter,
+        'A',
+      );
+    });
+
+    test('after an escalation the typing row names the AGENT', () {
+      // `handlerName` answers "who holds the session", which is not the same
+      // question as "who wrote this bubble". Once a session escalates,
+      // `handledBy` names the human — and the bot name the presenter still
+      // remembers for the transcript's earlier bubbles must NOT leak onto
+      // the typing row, or the customer watches "Kai is typing" while a
+      // person called Nadia is the one composing.
+      final MessageListPresenter presenter = MessageListPresenter();
+      presenter.present(
+        _inputs(
+          messages: <ChatMessage>[_msg(id: 'a', senderType: SenderType.bot)],
+          session: _session(
+            handledBy: const HandledBy(
+              kind: HandledByKind.bot,
+              id: 'bot_1',
+              displayName: 'Kai',
+            ),
+          ),
+        ),
+      );
+      expect(presenter.lastBotName, 'Kai');
+
+      final MessageListRender escalated = presenter.present(
+        _inputs(
+          messages: <ChatMessage>[_msg(id: 'a', senderType: SenderType.bot)],
+          session: _session(
+            handledBy: const HandledBy(
+              kind: HandledByKind.agent,
+              id: 'agt_9',
+              displayName: 'Nadia',
+            ),
+          ),
+        ),
+      );
+      expect(escalated.typingLabel, 'Nadia is typing');
+      expect(escalated.typingAvatarLetter, 'N');
+      // ...and the bot's own earlier bubble keeps its name, which is the
+      // reason `lastBotName` exists at all.
+      expect(escalated.rows.single.senderName, 'Kai');
+    });
   });
 
   group('the empty state', () {

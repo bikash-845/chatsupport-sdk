@@ -90,6 +90,7 @@ class MessageListRender {
     required this.announcement,
     required this.quickReplies,
     required this.typingLabel,
+    required this.typingAvatarLetter,
     required this.showEmptyState,
   });
 
@@ -103,6 +104,14 @@ class MessageListRender {
 
   /// "<who> is typing" — the only channel that can say WHO.
   final String typingLabel;
+
+  /// The initial for the typing row's avatar disc.
+  ///
+  /// Derived from the SAME [handlerName] that [typingLabel] is, so the disc
+  /// and the name a screen reader hears can never name two different people
+  /// — which is exactly what a second derivation off `session.assignedAgent`
+  /// would produce the moment a session escalates away from the bot.
+  final String? typingAvatarLetter;
 
   /// Whether to show "no messages yet". See [MessageListInputs.initialLoaded].
   final bool showEmptyState;
@@ -171,6 +180,8 @@ class MessageListPresenter {
       );
     }
 
+    final String handler = handlerName(inputs.session, botName);
+
     return MessageListRender(
       rows: List<MessageRow>.unmodifiable(rows),
       announcement: _announce(inputs, botName),
@@ -179,7 +190,8 @@ class MessageListPresenter {
         handoffKeywords: inputs.handoffKeywords,
         sessionClosed: inputs.sessionClosed,
       ),
-      typingLabel: '${handlerName(inputs.session, botName)} is typing',
+      typingLabel: '$handler is typing',
+      typingAvatarLetter: _avatarLetter(handler),
       showEmptyState: inputs.messages.isEmpty && inputs.initialLoaded,
     );
   }

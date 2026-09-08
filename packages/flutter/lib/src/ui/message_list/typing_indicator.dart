@@ -25,6 +25,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'message_avatar.dart';
+
 /// One full cycle of the dot animation — `dh-bounce`'s `1.2s`.
 const Duration kTypingDotPeriod = Duration(milliseconds: 1200);
 
@@ -62,7 +64,24 @@ const List<double> _dotPhases = <double>[0, 0.125, 0.25];
   return (dy: 0, opacity: restOpacity);
 }
 
-/// The typing bubble: an incoming bubble containing three bouncing dots.
+/// The typing bubble: an INCOMING ROW whose bubble holds three bouncing
+/// dots instead of words.
+///
+/// ── Why this is a whole row and not just a bubble ────────────────────────
+///
+/// It is built out of the same three pieces a real incoming message is,
+/// in the same order and at the same sizes: [MessageAvatar], a 6px gap, and
+/// a `surfaceContainerHighest` bubble at radius 16 (see [MessageBubbleRow],
+/// which is the definition those numbers are copied from). That is what
+/// makes it read as "the next message, being written" rather than as a
+/// status label — a bubble that sits 30px to the left of every bubble above
+/// it reads as a footer, whichever dots are inside it.
+///
+/// This is one deliberate step past `styles.ts`, where `.dh-typing` is a
+/// bare `align-self: flex-start` box with no `.dh-msg-avatar` beside it.
+/// The DOM row and this row indent their bubbles by the avatar's width, so
+/// in both ports an avatar-less typing bubble hangs out of the column the
+/// transcript established; Flutter is simply where it was noticed.
 ///
 /// Deliberately not a live region — a typing indicator that announces itself
 /// interrupts the message the customer is actually reading, and it can flap
@@ -70,33 +89,53 @@ const List<double> _dotPhases = <double>[0, 0.125, 0.25];
 /// used to be the fixed word "Agent", which named a human on a session being
 /// handled by the bot.
 class TypingIndicator extends StatelessWidget {
-  const TypingIndicator({super.key, required this.label});
+  const TypingIndicator({super.key, required this.label, this.avatarLetter});
 
   /// "<who> is typing", from `MessageListRender.typingLabel`.
   final String label;
 
+  /// The handler's initial, from `MessageListRender.typingAvatarLetter`.
+  ///
+  /// `null` only when nobody has a resolved name to take a letter from, and
+  /// then no disc is drawn — the same rule [MessageRow.avatarLetter] follows
+  /// for a message, so the two rows are never inconsistent about it.
+  final String? avatarLetter;
+
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    return Container(
-      // The incoming bubble's own padding and radius, from
-      // `MessageBubbleRow` — the point of this row is that it reads as a
-      // message someone is composing, so it may not be shaped differently
-      // from the message that follows it.
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Semantics(
-        label: label,
-        liveRegion: false,
-        // The three animated dots say SOMEONE is composing; this label is
-        // the only channel that can say who. Excluded rather than merged,
-        // so a screen reader reads the name and not the dots.
-        excludeSemantics: true,
-        child: const TypingDots(),
-      ),
+    final String? letter = avatarLetter;
+    return Row(
+      // `MessageBubbleRow`'s own alignment: the disc sits on the bubble's
+      // bottom edge, not its middle.
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisAlignment: MainAxisAlignment.start,
+      children: <Widget>[
+        if (letter != null) ...<Widget>[
+          MessageAvatar(letter: letter),
+          const SizedBox(width: 6),
+        ],
+        Container(
+          // The incoming bubble's own padding and radius, from
+          // `MessageBubbleRow` — the point of this row is that it reads as a
+          // message someone is composing, so it may not be shaped
+          // differently from the message that follows it.
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Semantics(
+            label: label,
+            liveRegion: false,
+            // The three animated dots say SOMEONE is composing; this label
+            // is the only channel that can say who. Excluded rather than
+            // merged, so a screen reader reads the name and not the dots.
+            excludeSemantics: true,
+            child: const TypingDots(),
+          ),
+        ),
+      ],
     );
   }
 }

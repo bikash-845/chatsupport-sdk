@@ -29,6 +29,7 @@ library;
 export 'delivery_failure.dart';
 export 'linkified_text.dart';
 export 'message_actions.dart';
+export 'message_avatar.dart';
 export 'message_content.dart';
 export 'message_list_presenter.dart';
 export 'message_list_view.dart';

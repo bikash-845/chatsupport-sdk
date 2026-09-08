@@ -13,13 +13,19 @@ import 'package:flutter_test/flutter_test.dart';
 Future<void> _pump(
   WidgetTester tester, {
   bool disableAnimations = false,
+  String? avatarLetter,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
       home: MediaQuery(
         data: MediaQueryData(disableAnimations: disableAnimations),
-        child: const Scaffold(
-          body: Center(child: TypingIndicator(label: 'Kai is typing')),
+        child: Scaffold(
+          body: Center(
+            child: TypingIndicator(
+              label: 'Kai is typing',
+              avatarLetter: avatarLetter,
+            ),
+          ),
         ),
       ),
     ),
@@ -115,6 +121,31 @@ void main() {
     }
 
     expect(find.byType(TypingIndicator), findsOneWidget);
+  });
+
+  testWidgets('wears the handler\'s disc, at the incoming row\'s size',
+      (WidgetTester tester) async {
+    await _pump(tester, avatarLetter: 'K');
+
+    // The SAME disc a real incoming bubble draws — not a lookalike sized by
+    // eye. A typing bubble that starts 30px left of every bubble above it
+    // reads as a footer, whichever dots are inside it.
+    expect(
+      find.descendant(
+        of: find.byType(TypingIndicator),
+        matching: find.byType(MessageAvatar),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('K'), findsOneWidget);
+  });
+
+  testWidgets('draws no disc when nobody has a resolved name',
+      (WidgetTester tester) async {
+    // `MessageRow.avatarLetter`'s own rule, so the two rows can never
+    // disagree about whether a nameless handler gets a disc.
+    await _pump(tester);
+    expect(find.byType(MessageAvatar), findsNothing);
   });
 
   testWidgets('names the handler through semantics, and never announces it',
