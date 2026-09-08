@@ -9,6 +9,7 @@ import 'connection/backoff.dart';
 import 'connection/connection.dart';
 import 'connection/socket.dart';
 import 'logic/agent_presence.dart';
+import 'logic/typing.dart';
 import 'protocol/enums.dart';
 import 'protocol/envelope.dart';
 import 'protocol/errors.dart';
@@ -161,6 +162,41 @@ class _FailedSend {
 ///  * REST: pagination, session history, `pastSessions`. [gaps] tells a host
 ///    exactly which `seq` span to refetch, and refetching is its job for now.
 class ChatClient {
+  /// Creates a client.
+  ///
+  /// ── `localParticipantId`, and why the SDK has to be told ──────────────
+  ///
+  /// Who this client's own participant is, used to drop the server's echo of
+  /// our own `typing.start` so the customer does not watch a "someone is
+  /// typing" indicator follow their own keystrokes. Null — the default —
+  /// disables the filter, which is the honest behaviour for a host that has
+  /// not named anybody rather than a guess made on their behalf.
+  ///
+  /// It is a parameter and not something this client works out, because
+  /// nothing on the wire carries the answer. `connection.ack` brings a
+  /// [SessionSnapshot] whose `participants` are [ParticipantSnapshot]s, and a
+  /// participant row has `participantId`, `type`, `lastReadAt` and
+  /// `displayName` — no "this one is you" marker anywhere on it. The
+  /// handshake says who is IN the session; it cannot say which of them we
+  /// are. Neither can anything else here: the hello frame sends no
+  /// participant id, the outbound typing payload is deliberately empty
+  /// because the SERVER attributes it (`typingPayload`), our own optimistic
+  /// echo carries `senderId: ''` for the same reason, and the server's
+  /// `message.send` ack reports a sender TYPE without a sender id.
+  ///
+  /// Two guesses suggest themselves and both are refused. Adopting the
+  /// snapshot's lone `CUSTOMER` row is wrong in precisely the case that
+  /// matters — an agent-side embed, where that row is somebody else — and
+  /// core, which has that code
+  /// (`packages/core/src/presence/watermarks.ts:220`), overrides it at both
+  /// of its real call sites for that reason. Inferring from `senderType` is
+  /// the heuristic `ticks.ts` explicitly refuses. So the id is known only to
+  /// the host application that configured the SDK, and only it can say.
+  ///
+  /// A Flutter host already holds this value: `ChatWidgetState`'s
+  /// `localParticipantId`, taken from `ChatIdentity.userId` — the port of
+  /// `widget.ts:524`, which reads `config.identity.userId` and likewise never
+  /// consults the ack. Passing that same value here is the whole wiring.
   ChatClient({
     required Uri wsUrl,
     required PublishableKey publishableKey,
@@ -169,6 +205,7 @@ class ChatClient {
     Scheduler scheduler = const SystemScheduler(),
     BackoffPolicy backoffPolicy = const BackoffPolicy(),
     UlidGenerator? ulids,
+    String? localParticipantId,
   })  : _scheduler = scheduler,
         _connection = ConnectionController(
           wsUrl: wsUrl,
@@ -180,12 +217,32 @@ class ChatClient {
           resumeTracker: ResumeTracker(),
           ulids: ulids,
         ) {
+    _typingController = TypingController(
+      scheduler: scheduler,
+      localParticipantId: localParticipantId,
+      onChanged: (String participantId, {required bool isTyping}) => _emit(
+        _typing,
+        TypingEvent(isTyping: isTyping, participantId: participantId),
+      ),
+      onSend: ({required bool isTyping}) => _connection.send(
+        _connection.buildFrame(
+          isTyping ? 'typing.start' : 'typing.stop',
+          typingPayload(),
+        ),
+      ),
+    );
     _subscription = _connection.frames.listen(_onFrame);
     _stateSubscription = _connection.states.listen(_onConnectionState);
   }
 
   final ConnectionController _connection;
   final Scheduler _scheduler;
+
+  /// Remote typing state, and the auto-clear that keeps it honest.
+  ///
+  /// `late final` rather than an initialiser because it closes over [_emit],
+  /// which is an instance method and so unavailable in the initialiser list.
+  late final TypingController _typingController;
 
   late final StreamSubscription<ServerFrame> _subscription;
   late final StreamSubscription<ConnectionState> _stateSubscription;
@@ -824,12 +881,28 @@ class ChatClient {
   }
 
   /// Signals that the local user started typing (§6.3).
-  void startTyping() =>
-      _connection.send(_connection.buildFrame('typing.start', typingPayload()));
+  ///
+  /// Safe to call on every keystroke: the frames are throttled to one per
+  /// three seconds, and this method reports ACTIVITY rather than sending a
+  /// frame. The naive version emits one frame per character — roughly 200
+  /// frames to communicate one bit.
+  ///
+  /// Those refreshes are not merely an optimisation. A conforming receiver
+  /// clears its indicator five seconds after the last `typing.start` it saw
+  /// (`logic/typing.dart`), so a client that sent one frame and then went
+  /// quiet would have its indicator cleared out from under a customer who is
+  /// still typing. The cadence is what holds it up.
+  ///
+  /// Typing also stops by itself three seconds after the last call, so a
+  /// customer who types and then walks away does not strand an indicator on
+  /// an agent's screen even if the host never calls [stopTyping].
+  void startTyping() => _typingController.startTyping();
 
   /// Signals that the local user stopped typing (§6.3).
-  void stopTyping() =>
-      _connection.send(_connection.buildFrame('typing.stop', typingPayload()));
+  ///
+  /// A no-op when not currently typing, so a host wiring this to both "input
+  /// cleared" and "blur" does not send two stops for one stop.
+  void stopTyping() => _typingController.stopTyping();
 
   /// Sets presence (§6.5).
   void setPresence(PresenceStatus status) {
@@ -841,8 +914,14 @@ class ChatClient {
 
   /// Releases every resource.
   Future<void> dispose() async {
+    // Subscriptions first, THEN the typing timers. The other order leaves a
+    // window in which a frame already in flight arrives after the controller
+    // was torn down and arms a fresh five-second timer on it — re-creating
+    // exactly the pending-timer-outlives-its-owner leak dispose exists to
+    // prevent.
     await _subscription.cancel();
     await _stateSubscription.cancel();
+    _typingController.dispose();
     await _connection.dispose();
     await _messages.close();
     await _sessions.close();
@@ -890,6 +969,12 @@ class ChatClient {
       _drainOutbox();
       return;
     }
+
+    // Nobody is typing over a socket that is gone. Left alone the indicator
+    // would sit there for the remainder of its timeout, and a reconnect that
+    // takes longer than that (backoff reaches 30s) would show live typing
+    // attributed to a connection that ended minutes ago.
+    _typingController.reset();
 
     if (_pending.isEmpty) return;
 
@@ -984,15 +1069,14 @@ class ChatClient {
       case 'message.new':
         _emit(_messages, ChatMessage.fromJson(d, 'd', frameType: type));
         break;
+      // Both frames go through [_typingController] rather than straight onto
+      // the stream, because a `typing.stop` that never arrives has to be
+      // manufactured from a timer — see `logic/typing.dart`.
       case 'typing.start':
+        _typingController.applyStart(d['participantId'] as String?);
+        break;
       case 'typing.stop':
-        _emit(
-          _typing,
-          TypingEvent(
-            isTyping: type == 'typing.start',
-            participantId: d['participantId'] as String?,
-          ),
-        );
+        _typingController.applyStop(d['participantId'] as String?);
         break;
       case 'agent.joined':
       case 'agent.left':
