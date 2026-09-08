@@ -50,6 +50,27 @@ const String kPublishableKeyKey = 'DHAAM_PUBLISHABLE_KEY';
 
 /// The `--dart-define` key naming a user JWT for this run.
 ///
+/// ── A guest needs one of these too ───────────────────────────────────────
+///
+/// This is the misconception the setup page exists to head off, and this app
+/// is what taught it: the token was presented as a flat requirement next to
+/// three deployment facts, with nothing said about what it identifies, so
+/// "there is no logged-in user yet" reads as "so there is nothing to
+/// authenticate".
+///
+/// Every visitor needs a token. `resolveConfig` in `packages/widget` refuses a
+/// config with neither a `tokenEndpoint` nor a `getToken` for the reason it
+/// states outright — "the browser is never given a secret key, so a token has
+/// to come from your own backend" — and a Flutter app is in exactly the same
+/// position: it ships to devices, so it cannot hold the secret key either.
+///
+/// What a guest's token differs in is WHO it says they are: it identifies an
+/// anonymous VISITOR. What marks somebody as a known customer is
+/// `ChatIdentity.profile`, which is a different input entirely and travels
+/// nowhere near this one — see `example_identity.dart`. The two are
+/// independent, which is why there are two switches on the host screen and
+/// only one of them is a credential.
+///
 /// ── A static token here is an EXAMPLE-ONLY shortcut ──────────────────────
 ///
 /// A real host implements [TokenProvider][dhaam_chat.TokenProvider] by calling
@@ -147,8 +168,11 @@ ExampleConfig readExampleConfig() {
     problems.add(
       const ConfigProblem(
         kAccessTokenKey,
-        'not set. A user JWT for this run — see the README on how a real host '
-        'mints one from its own backend instead.',
+        'not set. Every visitor needs one, guests included — this token says '
+        'WHICH visitor, and a guest is simply an anonymous one. What marks '
+        'somebody as a known customer is identity.profile, which is a '
+        'separate input and not a credential. See the README on how a real '
+        'host mints this from its own backend.',
       ),
     );
   }

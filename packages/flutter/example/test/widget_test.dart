@@ -127,6 +127,45 @@ void main() {
     );
   });
 
+  /// The reported misconception, and the page that taught it.
+  ///
+  /// "No access token should work for a guest." It never did — there is no
+  /// tokenless mode — and the setup page is where the belief was formed: the
+  /// token sat in a list of four requirements with nothing said about what it
+  /// identifies, so "nobody has logged in yet" reads from there as "so there
+  /// is nothing to authenticate".
+  testWidgets('the setup page says guests need a token, and what does not', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      const ExampleApp(
+        config: ExampleConfigIncomplete(<ConfigProblem>[
+          ConfigProblem(kAccessTokenKey, 'not set.'),
+        ]),
+      ),
+    );
+
+    // The claim, stated rather than implied.
+    expect(find.textContaining('Guests need a token too'), findsOneWidget);
+
+    // And the other half, which is the part that makes it make sense: the
+    // profile is what marks a customer, and it is not a credential.
+    expect(find.textContaining('identity.profile'), findsOneWidget);
+  });
+
+  test('the missing-token problem does not imply a tokenless mode', () {
+    final ExampleConfigIncomplete config =
+        readExampleConfig() as ExampleConfigIncomplete;
+    final ConfigProblem problem = config.problems
+        .firstWhere((ConfigProblem p) => p.key == kAccessTokenKey);
+
+    // A flat "not set" is what left room for the misconception. The sentence
+    // has to name who needs one — everybody — and what actually distinguishes
+    // a customer.
+    expect(problem.detail, contains('guests included'));
+    expect(problem.detail, contains('identity.profile'));
+  });
+
   test('the missing-key problem names the prefixes the parser accepts', () {
     final ExampleConfigIncomplete config =
         readExampleConfig() as ExampleConfigIncomplete;

@@ -99,6 +99,38 @@ correctly stops after its auth cap — leaving you looking at
 and visibly a JWT. The example app decodes the token's *shape* (never its
 signature) and names this case explicitly in its diagnostics strip.
 
+### Guests need a token too — the profile is what makes a customer
+
+There is no tokenless mode, and this is worth stating because the opposite is
+a natural thing to assume: "nobody has logged in, so there is nothing to
+authenticate." Every visitor needs a token, and a guest's token identifies an
+anonymous **visitor**. The reference refuses a config carrying neither a
+`tokenEndpoint` nor a `getToken` and gives the reason outright — "the browser
+is never given a secret key, so a token has to come from your own backend"
+(`packages/widget/src/config.ts`, `resolveConfig`). A Flutter app is in the
+same position: it ships to devices, so it cannot hold the secret key either.
+
+What marks somebody as a **known customer** is a different input entirely:
+
+| | token | `identity.profile` |
+|---|---|---|
+| What it is | a credential, minted by your backend | data your app already has |
+| Guest | **required** | omitted |
+| Signed-in customer | **required** | supplied |
+| Effect of omitting it | cannot connect at all | treated as a guest — the pre-chat form is asked |
+
+`identity.userId` decides nothing here. Every visitor has one — chat-service
+mints one the moment the socket acks — so a gate built on it never fires for
+anybody, and `ChatIdentity.isGuest` is deliberately `profile == null` and
+nothing else. `packages/widget/src/config.ts` says the same from the other
+end: "Supplying it — and only supplying it — is what makes the widget upsert
+that user as a Contact via `POST /identify`. `userId` alone does not and must
+not, because every guest has one of those too."
+
+The example demonstrates both modes: supply the token, then use the **Visitor**
+switch on the host screen. The user id stays the same across it and only the
+profile moves, which is the whole point.
+
 
 ## Running the example
 
@@ -132,7 +164,7 @@ of those two ways is least legible.
 | `DHAAM_WS_URL` | yes | The WebSocket endpoint. `ws://` or `wss://`. Goes to `ChatClient(wsUrl:)`. |
 | `DHAAM_API_URL` | yes | The REST **origin**, `http://` or `https://`, **with no path** — `RestClient`, `fetchRemoteConfig` and `fetchIpWatermark` each append `/chat-services/api/v1` themselves. Passing a value that already carries the base path builds a doubled one, and the symptom (every REST call 404s while the socket works fine) is hard to read backwards, so the example refuses it up front. |
 | `DHAAM_PUBLISHABLE_KEY` | yes | The tenant key, `dhp_live_…` or `dhp_test_…` — **not** `pk_…`, which `PublishableKey.parse` refuses (a bare `pk_test_` is Stripe's shape, and secret scanners report such a key as a Stripe key). Public by design: it identifies a tenant and grants nothing. |
-| `DHAAM_ACCESS_TOKEN` | yes | A user JWT for this run. **See the warning below.** |
+| `DHAAM_ACCESS_TOKEN` | yes | A user JWT for this run — required for **every** visitor, guests included. **See the warning below.** |
 | `DHAAM_SESSION_ID` | no | A conversation to open on. Unset lands on Home, which is what a visitor arriving fresh sees. |
 
 `--dart-define` rather than a checked-in constant or a `.env` file: one of these

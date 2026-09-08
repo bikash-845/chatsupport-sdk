@@ -151,7 +151,44 @@ class _SetupRequiredPage extends StatelessWidget {
                 ],
               ),
             ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 4),
+          // The reported misconception, answered where it is formed. The
+          // token sat in a list of four requirements with nothing said about
+          // what it identifies, and "no logged-in user yet" reads from there
+          // as "so there is nothing to authenticate".
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text('Guests need a token too', style: text.titleSmall),
+                const SizedBox(height: 6),
+                Text(
+                  'There is no tokenless mode, and $kAccessTokenKey is not '
+                  'optional for anonymous visitors. The token says WHICH '
+                  'visitor this is; a guest is simply an anonymous one. It has '
+                  'to come from your own backend because a shipped app is '
+                  'never given the secret key.',
+                  style: text.bodySmall,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'What makes somebody a known customer is a different input '
+                  'entirely — identity.profile, which is not a credential and '
+                  'travels nowhere near this token. Supply the token and omit '
+                  'the profile and you have a guest; supply both and you have '
+                  'a signed-in customer. The host screen switches between the '
+                  'two once this page is satisfied.',
+                  style: text.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
           Text('Run it like this', style: text.titleSmall),
           const SizedBox(height: 8),
           const _CodeBlock(_kRunCommand),
