@@ -108,6 +108,9 @@ typedef TypingStateChanged = void Function(
   required bool isTyping,
 });
 
+/// Puts one outbound `typing.start` / `typing.stop` on the wire (§7.3).
+typedef TypingFrameSink = void Function({required bool isTyping});
+
 /// Tracks who is currently typing, and clears anyone the server stops
 /// mentioning.
 ///
@@ -119,22 +122,31 @@ class TypingController {
   TypingController({
     required Scheduler scheduler,
     required TypingStateChanged onChanged,
+    required TypingFrameSink onSend,
     Duration remoteTimeout = kRemoteTypingTimeout,
+    Duration startInterval = kTypingStartInterval,
+    Duration idleTimeout = kTypingIdleTimeout,
     String? localParticipantId,
   })  : _scheduler = scheduler,
         _onChanged = onChanged,
+        _onSend = onSend,
         _remoteTimeout = remoteTimeout,
+        _startInterval = startInterval,
+        _idleTimeout = idleTimeout,
         _localParticipantId = localParticipantId {
     assertTypingTimings(
       remoteTimeout: remoteTimeout,
-      startInterval: kTypingStartInterval,
-      idleTimeout: kTypingIdleTimeout,
+      startInterval: startInterval,
+      idleTimeout: idleTimeout,
     );
   }
 
   final Scheduler _scheduler;
   final TypingStateChanged _onChanged;
+  final TypingFrameSink _onSend;
   final Duration _remoteTimeout;
+  final Duration _startInterval;
+  final Duration _idleTimeout;
 
   /// Whose relayed typing frames are this client's own echo, or null when the
   /// host has not said — see `ChatClient.localParticipantId` for why this can
@@ -162,6 +174,11 @@ class TypingController {
 
   /// Participants currently shown as typing, least recently active first.
   Iterable<String> get typers => _typers.keys;
+
+  // Outbound throttle state.
+  bool _outboundActive = false;
+  DateTime? _lastStartSentAt;
+  Cancellable? _idleTimer;
 
   /// Applies a server-relayed `typing.start` (§7.3).
   ///
@@ -214,6 +231,61 @@ class TypingController {
     _onChanged(participantId, isTyping: false);
   }
 
+  // ── Outbound: the cadence the receive-side window is stretched under ────
+
+  /// Reports local typing activity. Safe to call on every keystroke.
+  ///
+  /// Ports `typing.ts:237`. Three rules, and they are one policy rather than
+  /// three knobs:
+  ///
+  ///  1. LEADING EDGE. The first call emits `typing.start` immediately, NOT
+  ///     trailing-edge debounced. The whole value of the indicator is that it
+  ///     appears while the user is still typing, and delaying it by the
+  ///     debounce window is the wrong trade.
+  ///  2. REFRESH, NOT SUPPRESS-FOREVER. Calls within [kTypingStartInterval] of
+  ///     the last emitted start are dropped; the first call after that window
+  ///     emits a fresh one. Sustained typing costs one frame per interval
+  ///     instead of one per character (~200 frames to communicate one bit),
+  ///     and each frame doubles as the keepalive that re-arms the RECEIVER's
+  ///     auto-clear. This is the half that makes the 5-second window on the
+  ///     other side a net rather than a guess — see the library doc.
+  ///  3. IDLE AUTO-STOP. Every call re-arms an idle timer of
+  ///     [kTypingIdleTimeout]; when it fires, `typing.stop` goes out by
+  ///     itself. A user who types and walks away therefore does not strand an
+  ///     indicator on somebody else's screen even if the integrator never
+  ///     calls [stopTyping].
+  void startTyping() {
+    final DateTime now = _scheduler.now();
+    final DateTime? lastSent = _lastStartSentAt;
+    final bool dueForRefresh =
+        lastSent == null || now.difference(lastSent) >= _startInterval;
+
+    // Either this is a fresh burst of typing or the keepalive is due. The
+    // first disjunct is what preserves the leading edge across a stop/start
+    // inside one interval: [stopTyping] leaves [_lastStartSentAt] alone, so
+    // without it a user who sent a message and immediately began typing again
+    // would show nothing until the interval elapsed.
+    final bool shouldSend = !_outboundActive || dueForRefresh;
+
+    _outboundActive = true;
+    _armIdleTimer();
+
+    if (shouldSend) {
+      _lastStartSentAt = now;
+      _onSend(isTyping: true);
+    }
+  }
+
+  /// Reports that local typing ended — message sent, input cleared, blur.
+  ///
+  /// A no-op when not currently typing, so an integrator wiring this to both
+  /// "input cleared" and "blur" does not emit two stops for one stop.
+  void stopTyping() {
+    if (!_outboundActive) return;
+    _resetOutbound();
+    _onSend(isTyping: false);
+  }
+
   /// Clears everyone, reporting each as stopped.
   ///
   /// Called when the transport goes away. A socket that drops while an agent
@@ -222,6 +294,13 @@ class TypingController {
   /// exists — and on reconnect the sender's next `typing.start` re-arms it
   /// anyway, so nothing is lost by clearing early.
   void reset() {
+    // The outbound half goes too, and forgetting the last-sent time is the
+    // load-bearing part: the server never saw the start that was in flight
+    // when the socket died, so the next keystroke after a reconnect has to
+    // send a fresh one rather than be suppressed as a duplicate refresh.
+    _resetOutbound();
+    _lastStartSentAt = null;
+
     // Cancelled in full BEFORE anything is reported. A listener that reacts
     // synchronously can call straight back into this class, and doing both in
     // one pass would let it mutate the map being iterated.
@@ -242,6 +321,7 @@ class TypingController {
   /// object, and a disposed client keeping a 5-second timer alive is a leak
   /// that outlives the thing that created it.
   void dispose() {
+    _resetOutbound();
     for (final Cancellable timer in _typers.values) {
       timer.cancel();
     }
@@ -261,4 +341,26 @@ class TypingController {
   }
 
   void _cancel(String participantId) => _typers.remove(participantId)?.cancel();
+
+  void _armIdleTimer() {
+    _idleTimer?.cancel();
+    _idleTimer = _scheduler.schedule(_idleTimeout, () {
+      if (!_outboundActive) return;
+      _resetOutbound();
+      _onSend(isTyping: false);
+    });
+  }
+
+  /// Drops the outbound throttle state WITHOUT emitting a stop.
+  ///
+  /// The silence is the point at the two lifecycle call sites: [reset] runs
+  /// because the transport went away, so a stop frame would be written to a
+  /// socket that is already gone, and [dispose] runs during teardown. Only
+  /// [stopTyping] and the idle timer, which have a live connection and a
+  /// reason, actually send one.
+  void _resetOutbound() {
+    _idleTimer?.cancel();
+    _idleTimer = null;
+    _outboundActive = false;
+  }
 }

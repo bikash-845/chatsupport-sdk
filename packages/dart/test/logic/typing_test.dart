@@ -31,19 +31,31 @@ void main() {
   late FakeScheduler scheduler;
   late List<_Change> changes;
 
-  TypingController build(
-          {Duration? remoteTimeout, String? localParticipantId}) =>
+  /// Outbound frames, as `'start'` / `'stop'` in the order they went out.
+  late List<String> sent;
+
+  TypingController build({
+    Duration? remoteTimeout,
+    Duration? startInterval,
+    Duration? idleTimeout,
+    String? localParticipantId,
+  }) =>
       TypingController(
         scheduler: scheduler,
         onChanged: (String id, {required bool isTyping}) =>
             changes.add(_Change(id, isTyping: isTyping)),
+        onSend: ({required bool isTyping}) =>
+            sent.add(isTyping ? 'start' : 'stop'),
         remoteTimeout: remoteTimeout ?? kRemoteTypingTimeout,
+        startInterval: startInterval ?? kTypingStartInterval,
+        idleTimeout: idleTimeout ?? kTypingIdleTimeout,
         localParticipantId: localParticipantId,
       );
 
   setUp(() {
     scheduler = FakeScheduler();
     changes = <_Change>[];
+    sent = <String>[];
   });
 
   group('receive-side auto-clear', () {
@@ -240,6 +252,185 @@ void main() {
         ..applyStart('a');
 
       expect(controller.typers, equals(<String>['b', 'a']));
+    });
+  });
+
+  group('send-side cadence', () {
+    test('the first keystroke sends immediately (leading edge)', () {
+      // Trailing-edge debounce would be the wrong trade: the whole value of
+      // the indicator is that it appears while the user is still typing.
+      final TypingController controller = build();
+      controller.startTyping();
+      expect(sent, equals(<String>['start']));
+    });
+
+    test('a burst of keystrokes costs one frame, not one per character', () {
+      final TypingController controller = build();
+      for (int i = 0; i < 200; i++) {
+        controller.startTyping();
+      }
+      expect(sent, equals(<String>['start']));
+    });
+
+    test('sustained typing refreshes once per interval and never stops',
+        () async {
+      // This is the half that makes the receiver's 5s window a net rather
+      // than a guess: each refresh re-arms the other side's auto-clear.
+      // Modelled as a real typist — a keystroke every 500ms — rather than
+      // keystrokes exactly one interval apart, which is the knife-edge the
+      // next test covers on purpose.
+      final TypingController controller = build();
+
+      for (int tick = 0; tick <= 24; tick++) {
+        controller.startTyping();
+        await scheduler.advance(const Duration(milliseconds: 500));
+      }
+
+      // 12 seconds of typing: starts at 0s, 3s, 6s, 9s and 12s.
+      expect(sent, equals(List<String>.filled(5, 'start')));
+    });
+
+    test('a pause longer than the idle window stops, then starts again',
+        () async {
+      // The defaults make the idle window and the refresh interval the same
+      // 3 seconds, so a gap that long is genuinely idle rather than
+      // sustained: the stop is correct, and the next keystroke re-opens with
+      // a fresh start rather than a suppressed refresh.
+      final TypingController controller = build();
+      controller.startTyping();
+
+      await scheduler.advance(kTypingIdleTimeout);
+      controller.startTyping();
+
+      expect(sent, equals(<String>['start', 'stop', 'start']));
+    });
+
+    test('the refresh lands inside the receiver auto-clear window', () async {
+      // The relationship, asserted rather than described: drive a sender and
+      // a receiver off the same clock and the indicator must never drop
+      // during 30 seconds of continuous typing.
+      final List<String> remote = <String>[];
+      final TypingController sender = build();
+      final TypingController receiver = TypingController(
+        scheduler: scheduler,
+        onChanged: (String id, {required bool isTyping}) =>
+            remote.add(isTyping ? 'up' : 'down'),
+        onSend: ({required bool isTyping}) {},
+      );
+
+      // One keystroke a second for half a minute, with every frame the sender
+      // actually emits relayed onward as the server would relay it.
+      for (int second = 0; second <= 30; second++) {
+        sender.startTyping();
+        for (final String frame in sent) {
+          if (frame == 'start') receiver.applyStart('sender');
+        }
+        sent.clear();
+        await scheduler.advance(const Duration(seconds: 1));
+      }
+
+      expect(
+        remote,
+        equals(<String>['up']),
+        reason: 'the indicator went up once and never dropped',
+      );
+      receiver.dispose();
+      sender.dispose();
+    });
+
+    test('typing stops by itself when the user walks away', () async {
+      // No stopTyping() call anywhere: a host that never wires one still must
+      // not strand an indicator on somebody else's screen.
+      final TypingController controller = build();
+      controller.startTyping();
+      sent.clear();
+
+      await scheduler.advance(kTypingIdleTimeout);
+
+      expect(sent, equals(<String>['stop']));
+    });
+
+    test('the idle timer is re-armed by every keystroke, emitted or not',
+        () async {
+      // A suppressed refresh still counts as activity. If only emitted frames
+      // re-armed it, a fast typist would auto-stop mid-sentence.
+      final TypingController controller = build();
+      controller.startTyping();
+      sent.clear();
+
+      // Keystrokes every 500ms, all inside the 3s refresh window and so all
+      // suppressed, carrying past the 3s idle deadline.
+      for (int i = 0; i < 5; i++) {
+        await scheduler.advance(const Duration(milliseconds: 500));
+        controller.startTyping();
+      }
+
+      expect(sent, isEmpty, reason: 'no stop, and no premature refresh');
+    });
+
+    test('an explicit stop cancels the pending idle auto-stop', () async {
+      final TypingController controller = build();
+      controller
+        ..startTyping()
+        ..stopTyping();
+
+      await scheduler.advance(const Duration(minutes: 1));
+
+      expect(
+        sent,
+        equals(<String>['start', 'stop']),
+        reason: 'the idle timer must not add a second stop',
+      );
+      expect(scheduler.pending, isZero);
+    });
+
+    test('a stop while not typing sends nothing', () {
+      // An integrator wiring both "input cleared" and "blur" must not emit
+      // two stops for one stop.
+      final TypingController controller = build();
+      controller
+        ..startTyping()
+        ..stopTyping()
+        ..stopTyping()
+        ..stopTyping();
+
+      expect(sent, equals(<String>['start', 'stop']));
+    });
+
+    test('typing again after a stop sends a fresh start immediately', () {
+      // Inside the refresh window, so a naive interval check would swallow
+      // it and the customer would type into silence.
+      final TypingController controller = build();
+      controller
+        ..startTyping()
+        ..stopTyping()
+        ..startTyping();
+
+      expect(sent, equals(<String>['start', 'stop', 'start']));
+    });
+
+    test('a reconnect re-sends rather than suppressing as a duplicate', () {
+      // The server never saw the start that was in flight when the socket
+      // died, so the next keystroke must not be treated as a refresh.
+      final TypingController controller = build();
+      controller.startTyping();
+      sent.clear();
+
+      controller.reset();
+      controller.startTyping();
+
+      expect(sent, equals(<String>['start']));
+    });
+
+    test('reset does not write a stop to a socket that is already gone', () {
+      final TypingController controller = build();
+      controller.startTyping();
+      sent.clear();
+
+      controller.reset();
+
+      expect(sent, isEmpty);
+      expect(scheduler.pending, isZero);
     });
   });
 

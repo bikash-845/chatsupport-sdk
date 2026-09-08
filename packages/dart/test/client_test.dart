@@ -421,6 +421,58 @@ void main() {
       await harness.client.dispose();
     });
 
+    test('startTyping is safe to call per keystroke', () async {
+      // The naive version puts one frame on the wire per character — about
+      // 200 frames to communicate one bit.
+      final Harness harness = Harness();
+      await harness.connected();
+      final int before = harness.socket.sent.length;
+
+      for (int i = 0; i < 200; i++) {
+        harness.client.startTyping();
+      }
+
+      expect(harness.socket.sent.length - before, equals(1));
+
+      // ...and the frames that DO go out keep coming often enough that a
+      // conforming receiver never times the indicator out mid-sentence. A
+      // keystroke every 500ms across the refresh boundary costs exactly one
+      // more frame, and no stop.
+      for (int tick = 0; tick < 7; tick++) {
+        await harness.scheduler.advance(const Duration(milliseconds: 500));
+        harness.client.startTyping();
+      }
+
+      expect(harness.socket.sent.length - before, equals(2));
+      expect(
+        kTypingStartInterval,
+        lessThan(kRemoteTypingTimeout),
+        reason: 'the refresh has to land inside the receiver window',
+      );
+
+      await harness.client.dispose();
+    });
+
+    test('typing stops by itself when the user walks away', () async {
+      // A host that never calls stopTyping must still not strand an
+      // indicator on the agent's screen.
+      final Harness harness = Harness();
+      await harness.connected();
+      final int before = harness.socket.sent.length;
+
+      harness.client.startTyping();
+      await harness.scheduler.advance(kTypingIdleTimeout);
+
+      final List<String> types = harness.socket.sent
+          .skip(before)
+          .map((String raw) =>
+              (jsonDecode(raw) as Map<String, Object?>)['t']! as String)
+          .toList();
+      expect(types, equals(<String>['typing.start', 'typing.stop']));
+
+      await harness.client.dispose();
+    });
+
     test('markRead is one write path, over WebSocket only', () async {
       // v1 fired a WS event AND a redundant REST POST for the same fact
       // (§12.9). There is no REST call here to be out of sync with.

@@ -224,6 +224,12 @@ class ChatClient {
         _typing,
         TypingEvent(isTyping: isTyping, participantId: participantId),
       ),
+      onSend: ({required bool isTyping}) => _connection.send(
+        _connection.buildFrame(
+          isTyping ? 'typing.start' : 'typing.stop',
+          typingPayload(),
+        ),
+      ),
     );
     _subscription = _connection.frames.listen(_onFrame);
     _stateSubscription = _connection.states.listen(_onConnectionState);
@@ -875,12 +881,28 @@ class ChatClient {
   }
 
   /// Signals that the local user started typing (§6.3).
-  void startTyping() =>
-      _connection.send(_connection.buildFrame('typing.start', typingPayload()));
+  ///
+  /// Safe to call on every keystroke: the frames are throttled to one per
+  /// three seconds, and this method reports ACTIVITY rather than sending a
+  /// frame. The naive version emits one frame per character — roughly 200
+  /// frames to communicate one bit.
+  ///
+  /// Those refreshes are not merely an optimisation. A conforming receiver
+  /// clears its indicator five seconds after the last `typing.start` it saw
+  /// (`logic/typing.dart`), so a client that sent one frame and then went
+  /// quiet would have its indicator cleared out from under a customer who is
+  /// still typing. The cadence is what holds it up.
+  ///
+  /// Typing also stops by itself three seconds after the last call, so a
+  /// customer who types and then walks away does not strand an indicator on
+  /// an agent's screen even if the host never calls [stopTyping].
+  void startTyping() => _typingController.startTyping();
 
   /// Signals that the local user stopped typing (§6.3).
-  void stopTyping() =>
-      _connection.send(_connection.buildFrame('typing.stop', typingPayload()));
+  ///
+  /// A no-op when not currently typing, so a host wiring this to both "input
+  /// cleared" and "blur" does not send two stops for one stop.
+  void stopTyping() => _typingController.stopTyping();
 
   /// Sets presence (§6.5).
   void setPresence(PresenceStatus status) {
