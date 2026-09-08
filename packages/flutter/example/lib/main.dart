@@ -35,6 +35,7 @@ import 'package:dhaam_chat/dhaam_chat.dart'
 import 'package:dhaam_chat_flutter/dhaam_chat_flutter.dart'
     show
         ChatClientAdapter,
+        ChatIdentity,
         ChatWidget,
         ChatWidgetState,
         ChatWidgetCubit,
@@ -49,6 +50,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'example_config.dart';
+import 'example_identity.dart';
 import 'rest_session_actions.dart';
 import 'seams.dart';
 import 'token_shape.dart';
@@ -227,6 +229,16 @@ class _HostHomePageState extends State<_HostHomePage> {
   /// Whatever `captureContactInfo` managed to collect, merged as it arrives.
   RestContactInfo _contact = const RestContactInfo();
 
+  /// Which visitor the next panel will be opened as.
+  ///
+  /// Held HERE, on the host screen, rather than inside the panel — because
+  /// that is where it lives in a real app. A merchant's app knows whether it
+  /// has a signed-in customer long before anybody taps the chat button, and
+  /// `ChatWidgetCubit` takes the answer once, at construction. Flipping this
+  /// switch therefore changes the NEXT panel, and the panel is built fresh on
+  /// every open, so no rebuild of the app is needed to see both modes.
+  ExampleVisitor _visitor = ExampleVisitor.guest;
+
   @override
   void initState() {
     super.initState();
@@ -302,6 +314,10 @@ class _HostHomePageState extends State<_HostHomePage> {
           config: widget.config,
           initialConfig: _config ?? defaultRemoteConfig,
           sessionActions: _sessionActions,
+          // Read at PUSH time, not captured when this state was built, so the
+          // switch above governs the panel about to open rather than the one
+          // the app happened to start with.
+          identity: exampleIdentity(_visitor),
           // The same client the session actions were built from, threaded
           // down the same way and for the same reason: three more seams — the
           // issue reporter, the attachment uploader, and the transcript
@@ -337,6 +353,42 @@ class _HostHomePageState extends State<_HostHomePage> {
             label: const Text('Open chat'),
           ),
           const SizedBox(height: 28),
+          _Section(
+            title: 'Visitor',
+            children: <Widget>[
+              // A merchant's app knows this before the chat button is tapped.
+              // Here it is a switch so both modes can be seen in one run.
+              SwitchListTile(
+                key: const Key('host.identifiedSwitch'),
+                contentPadding: EdgeInsets.zero,
+                value: _visitor == ExampleVisitor.identified,
+                onChanged: (bool on) => setState(() {
+                  _visitor =
+                      on ? ExampleVisitor.identified : ExampleVisitor.guest;
+                }),
+                title: const Text('Sign in as a known customer'),
+                subtitle: Text(exampleVisitorExplanation(_visitor)),
+              ),
+              const SizedBox(height: 8),
+              // Both rows, always, and this pairing is the point of the
+              // section: the id does NOT change across the switch and the
+              // answer does. A demo where the guest had no id would teach the
+              // most available wrong answer — that the id is what decides.
+              _Fact('identity.userId', kExampleUserId),
+              _Fact(
+                'identity.profile',
+                _visitor == ExampleVisitor.identified
+                    ? '${kExampleProfile.name} <${kExampleProfile.email}>'
+                    : 'absent',
+              ),
+              _Fact('→ isGuest', '${exampleIdentity(_visitor).isGuest}'),
+              const _Fact(
+                'Pre-chat form',
+                'asked of guests only, and only when the merchant enabled it '
+                    'AND published at least one field',
+              ),
+            ],
+          ),
           _Section(
             title: 'Connection',
             children: <Widget>[
@@ -417,12 +469,18 @@ class _ChatPanelPage extends StatefulWidget {
     required this.config,
     required this.initialConfig,
     required this.sessionActions,
+    required this.identity,
     required this.rest,
   });
 
   final ExampleConfigReady config;
   final RemoteConfig initialConfig;
   final RestSessionActions sessionActions;
+
+  /// Who the host says this visitor is. See `example_identity.dart` — the
+  /// profile inside it is the single thing that decides whether the pre-chat
+  /// questions get asked.
+  final ChatIdentity identity;
 
   /// Owned by `_HostHomePageState`, borrowed here. This route does not close
   /// it — the state that created it does, which is the same ownership rule
@@ -470,6 +528,11 @@ class _ChatPanelPageState extends State<_ChatPanelPage> {
       client: ChatClientAdapter(_client),
       initialConfig: widget.initialConfig,
       sessionId: widget.config.sessionId,
+      // The argument whose absence was the reported "pre-chat form shows for
+      // logged-in users" bug. The parameter defaults to `ChatIdentity.guest`,
+      // so an app that never passes one has no logged-in path at all — every
+      // visitor is a guest and every visitor is asked.
+      identity: widget.identity,
       // The seam that turns the end-of-conversation surfaces on. Absent means
       // OFF, not broken: no rating card, no ended footer, no way to end a
       // conversation — which is the correct outcome for a host that wired no
