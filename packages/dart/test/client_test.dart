@@ -2,6 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:dhaam_chat/dhaam_chat.dart';
+// The typing timings are internal machinery rather than public surface, but
+// they ARE observable behaviour of `ChatClient.typing`, so the tests that pin
+// that behaviour reach for the real constants instead of restating them.
+import 'package:dhaam_chat/src/logic/typing.dart';
 import 'package:test/test.dart';
 
 import 'fakes.dart';
@@ -9,6 +13,19 @@ import 'fakes.dart';
 final PublishableKey testKey = PublishableKey.parse('dhp_${'test'}_abc123XYZ');
 
 const String _serverUlid = '01BX5ZZKBKACTAV9WEVGEMMVRZ';
+
+/// One server-relayed typing frame (§7.3). [participantId] is null for the
+/// malformed case where the server relays typing attributed to nobody.
+String typingJson(String type, String? participantId) =>
+    jsonEncode(<String, Object?>{
+      'v': 1,
+      't': type,
+      'id': _serverUlid,
+      'ts': 1700000000000,
+      'd': <String, Object?>{
+        if (participantId != null) 'participantId': participantId,
+      },
+    });
 
 String ackJson({int seq = 5, String sessionId = 's1'}) =>
     jsonEncode(<String, Object?>{
@@ -278,6 +295,57 @@ void main() {
       expect(events.map((TypingEvent e) => e.isTyping),
           equals(<bool>[true, false]));
       expect(events.first.participantId, equals('p1'));
+
+      await harness.client.dispose();
+    });
+
+    test('a typing.stop that never arrives still clears the indicator',
+        () async {
+      // The integrator-visible half of the bug: on a live server the stop is
+      // genuinely lost (dropped frame, agent's socket dying mid-compose,
+      // server restart) and the transcript keeps an "agent is typing" bubble
+      // up forever. Driven by FakeScheduler — a five-second real delay here
+      // would be a test nobody runs.
+      final Harness harness = Harness();
+      await harness.connected();
+
+      final List<TypingEvent> events = <TypingEvent>[];
+      harness.client.typing.listen(events.add);
+
+      harness.socket.deliver(typingJson('typing.start', 'p1'));
+      await flush();
+      expect(events.map((TypingEvent e) => e.isTyping), equals(<bool>[true]));
+
+      await harness.scheduler.advance(kRemoteTypingTimeout);
+      await flush();
+
+      expect(
+        events.map((TypingEvent e) => e.isTyping),
+        equals(<bool>[true, false]),
+        reason: 'no typing.stop was ever delivered',
+      );
+      expect(events.last.participantId, equals('p1'));
+
+      await harness.client.dispose();
+    });
+
+    test('a dropped transport clears typing rather than leaving it up',
+        () async {
+      // Backoff reaches 30 seconds, so "it clears itself in 5" is not an
+      // answer here: the socket is gone and nobody is typing over it.
+      final Harness harness = Harness();
+      await harness.connected();
+
+      final List<TypingEvent> events = <TypingEvent>[];
+      harness.client.typing.listen(events.add);
+
+      harness.socket.deliver(typingJson('typing.start', 'p1'));
+      await flush();
+      await harness.socket.drop();
+      await flush();
+
+      expect(events.map((TypingEvent e) => e.isTyping),
+          equals(<bool>[true, false]));
 
       await harness.client.dispose();
     });

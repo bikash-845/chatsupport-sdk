@@ -9,6 +9,7 @@ import 'connection/backoff.dart';
 import 'connection/connection.dart';
 import 'connection/socket.dart';
 import 'logic/agent_presence.dart';
+import 'logic/typing.dart';
 import 'protocol/enums.dart';
 import 'protocol/envelope.dart';
 import 'protocol/errors.dart';
@@ -180,12 +181,25 @@ class ChatClient {
           resumeTracker: ResumeTracker(),
           ulids: ulids,
         ) {
+    _typingController = TypingController(
+      scheduler: scheduler,
+      onChanged: (String participantId, {required bool isTyping}) => _emit(
+        _typing,
+        TypingEvent(isTyping: isTyping, participantId: participantId),
+      ),
+    );
     _subscription = _connection.frames.listen(_onFrame);
     _stateSubscription = _connection.states.listen(_onConnectionState);
   }
 
   final ConnectionController _connection;
   final Scheduler _scheduler;
+
+  /// Remote typing state, and the auto-clear that keeps it honest.
+  ///
+  /// `late final` rather than an initialiser because it closes over [_emit],
+  /// which is an instance method and so unavailable in the initialiser list.
+  late final TypingController _typingController;
 
   late final StreamSubscription<ServerFrame> _subscription;
   late final StreamSubscription<ConnectionState> _stateSubscription;
@@ -841,6 +855,7 @@ class ChatClient {
 
   /// Releases every resource.
   Future<void> dispose() async {
+    _typingController.dispose();
     await _subscription.cancel();
     await _stateSubscription.cancel();
     await _connection.dispose();
@@ -890,6 +905,12 @@ class ChatClient {
       _drainOutbox();
       return;
     }
+
+    // Nobody is typing over a socket that is gone. Left alone the indicator
+    // would sit there for the remainder of its timeout, and a reconnect that
+    // takes longer than that (backoff reaches 30s) would show live typing
+    // attributed to a connection that ended minutes ago.
+    _typingController.reset();
 
     if (_pending.isEmpty) return;
 
@@ -984,15 +1005,14 @@ class ChatClient {
       case 'message.new':
         _emit(_messages, ChatMessage.fromJson(d, 'd', frameType: type));
         break;
+      // Both frames go through [_typingController] rather than straight onto
+      // the stream, because a `typing.stop` that never arrives has to be
+      // manufactured from a timer — see `logic/typing.dart`.
       case 'typing.start':
+        _typingController.applyStart(d['participantId'] as String?);
+        break;
       case 'typing.stop':
-        _emit(
-          _typing,
-          TypingEvent(
-            isTyping: type == 'typing.start',
-            participantId: d['participantId'] as String?,
-          ),
-        );
+        _typingController.applyStop(d['participantId'] as String?);
         break;
       case 'agent.joined':
       case 'agent.left':
