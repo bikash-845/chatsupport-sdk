@@ -205,6 +205,11 @@ AttachmentMetadata _metadata() => const AttachmentMetadata(
       mediaType: 'images',
     );
 
+/// Shared with `session_list_wiring_test.dart`, which needs the same minimal
+/// seam. Exposed as a factory rather than copied, so a new interface member
+/// breaks one fake instead of drifting between two.
+WidgetChatClient makeFakeClient() => _FakeClient();
+
 /// The narrowest thing that satisfies `WidgetChatClient`.
 ///
 /// Broadcast controllers because the Cubit subscribes to every one of them in

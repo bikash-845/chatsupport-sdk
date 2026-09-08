@@ -50,6 +50,13 @@ dependencies:
     path: ..
 
 dev_dependencies:
+  # For MockClient in session_list_wiring_test.dart, which drives the app's own
+  # session-list wiring over a stubbed transport. `http` arrives transitively
+  # through dhaam_chat_rest, but a package that imports it BY NAME must declare
+  # it -- depend_on_referenced_packages is right that a transitive dependency
+  # vanishes the moment the middle package drops it.
+  http: ^1.6.0
+
   flutter_test:
     sdk: flutter
   # ^5.0.0 to match `dhaam_chat_flutter`'s own dev dependency rather than the

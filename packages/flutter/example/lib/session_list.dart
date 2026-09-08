@@ -47,7 +47,7 @@
 library;
 
 import 'package:dhaam_chat_flutter/dhaam_chat_flutter.dart'
-    show ChatSessionSummary, SessionListRefresher;
+    show ChatSessionSummary, ChatWidgetCubit, SessionListRefresher;
 // `SessionApi` is an extension on `RestClient`, not a member of it: without it
 // in scope `rest.listSessions(...)` does not resolve. Named explicitly rather
 // than importing the barrel wholesale so that stays visible — the same reason
@@ -173,3 +173,46 @@ String describeSessionListError(Object error) =>
     error is RestValidationException
         ? 'caller bug, not a network error — nothing was sent: ${error.message}'
         : '$error';
+
+/// The refresher wired to a Cubit — the hop the reported bug was missing.
+///
+/// ── Why this is a named function and not four lines in `main.dart` ──────
+///
+/// It was four lines in `main.dart`, and nothing could test them. Every piece
+/// around it had coverage — `listSessions` in `dhaam_chat_rest`, this file's
+/// serialisation above, `MessagesScreen`'s rendering in the package — and the
+/// one line joining them to the screen had none, which is precisely the line
+/// that was absent when "no conversations list" was reported.
+///
+/// A test can drive this with a `MockClient`-backed [RestClient] and assert
+/// the Cubit's state actually changed. Deleting the `updateSessionSummaries`
+/// call inside it turns that test red; while the same call lived in a State's
+/// closure, no test could reach it and cutting the wire stayed green.
+///
+/// [isStale] lets the caller drop an answer that arrived after teardown —
+/// `main.dart` passes its `mounted` check. Default is "always deliver",
+/// because a caller with no lifetime of its own should not have to say so.
+SessionListRefresher sessionListFor({
+  required ChatWidgetCubit cubit,
+  required RestClient rest,
+  required void Function(Object error, StackTrace stackTrace) onError,
+  void Function(List<ChatSessionSummary> sessions)? onLoaded,
+  bool Function() isStale = _neverStale,
+  int limit = kExampleSessionLimit,
+}) {
+  return exampleSessionListRefresher(
+    rest: rest,
+    limit: limit,
+    onSessions: (List<ChatSessionSummary> sessions) {
+      if (isStale()) return;
+      // The write the reported bug was missing. `dhaam_chat` cannot list
+      // sessions, so this is the only way the Messages screen is ever given
+      // anything to draw.
+      cubit.updateSessionSummaries(sessions);
+      onLoaded?.call(sessions);
+    },
+    onError: onError,
+  );
+}
+
+bool _neverStale() => false;

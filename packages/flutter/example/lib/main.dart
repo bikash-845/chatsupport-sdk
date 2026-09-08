@@ -666,26 +666,23 @@ class _ChatPanelPageState extends State<_ChatPanelPage> {
     // actions take the refresh hook. `late final _sessions` is what lets the
     // hook name the refresher it is being wired into — safe because nothing
     // fires during construction.
-    _sessions = exampleSessionListRefresher(
+    // Wired through `sessionListFor` rather than inline: while these four
+    // lines lived in this closure no test could reach them, and this is the
+    // exact hop that was missing when "no conversations list" was reported.
+    _sessions = sessionListFor(
+      cubit: _cubit,
       rest: widget.rest,
-      onSessions: (List<ChatSessionSummary> sessions) {
-        if (!mounted) return;
-        // The write the reported bug was missing. `dhaam_chat` cannot list
-        // sessions, so this is the only way the Messages screen is ever
-        // given anything to draw.
-        _cubit.updateSessionSummaries(sessions);
-        setState(() {
-          // An empty page is a SUCCESS and is the guest signal — never an
-          // error, and never a reason to keep saying "loading". Reporting it
-          // as a failure is the mistake `listSessions` documents at length,
-          // because it makes "not identified" indistinguishable from "the
-          // lookup failed".
-          _sessionsView = sessions.isEmpty
-              ? ExampleSessionListView.empty
-              : ExampleSessionListView.loaded;
-          _sessionsError = null;
-        });
-      },
+      isStale: () => !mounted,
+      onLoaded: (List<ChatSessionSummary> sessions) => setState(() {
+        // An empty page is a SUCCESS and is the guest signal — never an
+        // error, and never a reason to keep saying "loading". Reporting it as
+        // a failure is the mistake `listSessions` documents at length: it
+        // makes "not identified" indistinguishable from "the lookup failed".
+        _sessionsView = sessions.isEmpty
+            ? ExampleSessionListView.empty
+            : ExampleSessionListView.loaded;
+        _sessionsError = null;
+      }),
       onError: (Object error, StackTrace stackTrace) {
         if (!mounted) return;
         setState(() {
