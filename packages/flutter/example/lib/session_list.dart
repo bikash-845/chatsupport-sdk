@@ -169,7 +169,7 @@ SessionListRefresher exampleSessionListRefresher({
 /// this feeds is a developer strip, not customer-facing UI; a customer is
 /// shown the previous page and no error at all, which is the refresher's own
 /// documented behaviour.
-String describeSessionListError(Object error) => error
-        is RestValidationException
-    ? 'caller bug, not a network error — nothing was sent: ${error.message}'
-    : '$error';
+String describeSessionListError(Object error) =>
+    error is RestValidationException
+        ? 'caller bug, not a network error — nothing was sent: ${error.message}'
+        : '$error';

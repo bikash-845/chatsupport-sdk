@@ -46,7 +46,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('createAttachmentDraft, given this app’s wiring', () {
-    test('an uploader produces a draft controller — the paperclip’s '
+    test(
+        'an uploader produces a draft controller — the paperclip’s '
         'precondition', () async {
       // Exactly what `main.dart` passes. If that argument is ever dropped,
       // this is what goes red instead of the button quietly vanishing.
@@ -237,6 +238,9 @@ class _FakeClient implements WidgetChatClient {
   Stream<SessionSnapshot> get sessions => _sessions.stream;
   @override
   Stream<TypingEvent> get typing => _typing.stream;
+
+  @override
+  List<String> get typingParticipants => const <String>[];
   @override
   Stream<ReconnectingEvent> get reconnecting => _reconnecting.stream;
   @override

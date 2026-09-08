@@ -29,6 +29,15 @@ abstract interface class WidgetChatClient {
   Stream<SessionSnapshot> get sessions;
   Stream<TypingEvent> get typing;
 
+  /// Who is currently shown as typing, least recently active first.
+  ///
+  /// Read INSTEAD OF folding [typing]'s events by hand. Each event carries one
+  /// participant's flag, so a consumer that collapses the stream by reading
+  /// `event.isTyping` clears the indicator when agent A stops even though
+  /// agent B is still typing — the multi-participant bug `TypingController`'s
+  /// map exists to prevent, reintroduced by whoever folds it wrong.
+  List<String> get typingParticipants;
+
   /// One event per scheduled reconnect (§6.5).
   ///
   /// The one input no state snapshot carries. `connectionState` cycles
@@ -236,6 +245,9 @@ class ChatClientAdapter implements WidgetChatClient {
 
   @override
   Stream<TypingEvent> get typing => _client.typing;
+
+  @override
+  List<String> get typingParticipants => _client.typingParticipants;
 
   @override
   Stream<ReconnectingEvent> get reconnecting => _client.reconnecting;

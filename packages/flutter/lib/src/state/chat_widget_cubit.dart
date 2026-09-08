@@ -1577,8 +1577,20 @@ class ChatWidgetCubit extends Cubit<ChatWidgetState> {
         ),
       );
 
+  /// A typing event landed. The indicator follows WHO is typing, not the
+  /// flag on the event that happened to arrive last.
+  ///
+  /// Reading `event.isTyping` here looks right and is not: each event speaks
+  /// for one participant. Agent A starts, agent B starts, A stops — and the
+  /// last event says `false` while B is still mid-sentence. That is exactly
+  /// the bug `TypingController`'s per-participant map exists to prevent, and
+  /// collapsing the stream by hand reintroduces it one layer above the fix.
+  ///
+  /// So the answer comes from the client's own fold, which is also what makes
+  /// the 5s auto-clear work end to end: a manufactured stop removes one
+  /// participant from that map and the indicator stays up for the others.
   void _onTyping(TypingEvent event) =>
-      emit(state.copyWith(isTyping: event.isTyping));
+      emit(state.copyWith(isTyping: _client.typingParticipants.isNotEmpty));
 
   @override
   Future<void> close() async {

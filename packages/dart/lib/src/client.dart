@@ -14,6 +14,7 @@ import 'protocol/enums.dart';
 import 'protocol/envelope.dart';
 import 'protocol/errors.dart';
 import 'protocol/frames.dart';
+import 'protocol/json.dart';
 import 'protocol/ulid.dart';
 import 'resume/resume_tracker.dart';
 
@@ -408,6 +409,23 @@ class ChatClient {
 
   /// Authoritative session snapshots. Overwrite local state wholesale (§9.4).
   Stream<SessionSnapshot> get sessions => _sessions.stream;
+
+  /// Who is currently shown as typing, least recently active first.
+  ///
+  /// ── Why this exists beside [typing] ─────────────────────────────────
+  ///
+  /// [typing] is a stream of DISCRETE events, and a consumer that collapses
+  /// it to one boolean by reading each event's flag gets the multi-participant
+  /// case wrong: agent A starts, agent B starts, A stops — and the consumer
+  /// clears the indicator while B is still typing. That is the exact bug
+  /// `TypingController`'s per-participant map exists to prevent, and leaving
+  /// only the stream exposed pushes it one layer up into whoever folds it.
+  ///
+  /// So the fold is published rather than re-derived, the same way
+  /// `agent_presence.dart` folds `agent.joined`/`agent.left` at the one place
+  /// the discriminator still exists instead of handing consumers the raw
+  /// events. Empty means nobody.
+  List<String> get typingParticipants => _typingController.typers;
 
   /// Remote typing state (§6.5).
   Stream<TypingEvent> get typing => _typing.stream;
@@ -1073,10 +1091,14 @@ class ChatClient {
       // the stream, because a `typing.stop` that never arrives has to be
       // manufactured from a timer — see `logic/typing.dart`.
       case 'typing.start':
-        _typingController.applyStart(d['participantId'] as String?);
+        _typingController.applyStart(
+          optionalString(d, 'participantId', 'd', frameType: type),
+        );
         break;
       case 'typing.stop':
-        _typingController.applyStop(d['participantId'] as String?);
+        _typingController.applyStop(
+          optionalString(d, 'participantId', 'd', frameType: type),
+        );
         break;
       case 'agent.joined':
       case 'agent.left':

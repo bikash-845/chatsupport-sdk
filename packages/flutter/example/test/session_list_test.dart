@@ -226,7 +226,8 @@ void main() {
 
       await refresher.refresh();
 
-      expect(fetches, 2, reason: 'the ask during the flight is owed a re-issue');
+      expect(fetches, 2,
+          reason: 'the ask during the flight is owed a re-issue');
       expect(writes.last.single.id, 'page2',
           reason: 'the newer page must land last');
     });

@@ -88,6 +88,15 @@ class FakeWidgetChatClient implements WidgetChatClient {
   Stream<SessionSnapshot> get sessions => _sessions.stream;
   @override
   Stream<TypingEvent> get typing => _typing.stream;
+
+  /// What `typingParticipants` reports. A test drives this directly, because
+  /// the fold it stands in for lives in `dhaam_chat`'s TypingController and is
+  /// tested there — what matters here is that the cubit READS it rather than
+  /// folding the stream itself.
+  List<String> typers = <String>[];
+
+  @override
+  List<String> get typingParticipants => typers;
   @override
   Stream<ReconnectingEvent> get reconnecting => _reconnecting.stream;
   @override
@@ -195,8 +204,26 @@ class FakeWidgetChatClient implements WidgetChatClient {
 
   void emitSession(SessionSnapshot session) => _sessions.add(session);
 
-  void emitTyping(bool isTyping) =>
-      _typing.add(TypingEvent(isTyping: isTyping));
+  /// One typing event, with [typers] kept consistent with it.
+  ///
+  /// The real client cannot emit `isTyping: true` while nobody is in its
+  /// per-participant map — the event IS that map changing. A fake that let
+  /// the two disagree would model a state the protocol client cannot reach,
+  /// and every test written against it would be testing fiction.
+  ///
+  /// Set [typers] directly before calling this when a test needs the
+  /// multi-participant case, where the map is exactly what the single flag
+  /// cannot express.
+  void emitTyping(bool isTyping, {String participantId = 'agent-1'}) {
+    if (isTyping) {
+      if (!typers.contains(participantId)) {
+        typers = <String>[...typers, participantId];
+      }
+    } else {
+      typers = typers.where((String id) => id != participantId).toList();
+    }
+    _typing.add(TypingEvent(isTyping: isTyping, participantId: participantId));
+  }
 
   /// One scheduled-retry event, as `ChatClient` emits per backoff arming.
   void emitReconnecting(

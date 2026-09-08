@@ -272,8 +272,7 @@ const List<SeamReport> seamReports = <SeamReport>[
   SeamReport(
     name: 'Session list (updateSessionSummaries)',
     wiring: SeamWiring.wired,
-    detail:
-        'dhaam_chat_rest listSessions, mapped and pushed through '
+    detail: 'dhaam_chat_rest listSessions, mapped and pushed through '
         'ChatWidgetCubit.updateSessionSummaries by a SessionListRefresher — '
         'see session_list.dart. The Cubit cannot populate this itself: '
         'dhaam_chat has no HTTP layer and cannot list sessions at all, so a '

@@ -15,6 +15,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'fake_widget_chat_client.dart';
 
 void main() {
+  _typingFoldTests();
+
   late FakeWidgetChatClient client;
   late ChatWidgetCubit cubit;
 
@@ -72,5 +74,61 @@ void main() {
     expect(cubit.state.lastError?.code, ErrorCode.rateLimited);
     expect(cubit.state.suspendReason, isNull,
         reason: 'still trying — suspendReason is what says otherwise');
+  });
+}
+
+/// The typing indicator follows WHO is typing, not the last event's flag.
+///
+/// Found by an adversarial review of the typing port, which called it "the
+/// exact bug this module was built to eliminate, recurring one layer up": the
+/// protocol client keeps a per-participant map precisely so a stop from one
+/// agent cannot clear an indicator another agent is still earning, and the
+/// cubit threw that away by reading `event.isTyping` off whichever event
+/// arrived last.
+void _typingFoldTests() {
+  group('typing fold', () {
+    late FakeWidgetChatClient client;
+    late ChatWidgetCubit cubit;
+
+    setUp(() {
+      client = FakeWidgetChatClient();
+      cubit = ChatWidgetCubit(client: client);
+    });
+
+    tearDown(() async {
+      await cubit.close();
+      await client.dispose();
+    });
+
+    test('one agent stopping does not clear an indicator another still earns',
+        () async {
+      // A starts, B starts, A stops. The last event says isTyping:false while
+      // B is still mid-sentence.
+      client.emitTyping(true, participantId: 'agent-a');
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state.isTyping, isTrue);
+
+      client.emitTyping(true, participantId: 'agent-b');
+      await Future<void>.delayed(Duration.zero);
+
+      // A's stop — including the 5s auto-clear manufacturing one — removes A
+      // from the map and nothing else.
+      client.emitTyping(false, participantId: 'agent-a');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(cubit.state.isTyping, isTrue,
+          reason: 'B is still typing; reading the last event flag says false');
+    });
+
+    test('the indicator clears when the last participant stops', () async {
+      client.emitTyping(true, participantId: 'agent-a');
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state.isTyping, isTrue);
+
+      client.emitTyping(false, participantId: 'agent-a');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(cubit.state.isTyping, isFalse);
+    });
   });
 }
