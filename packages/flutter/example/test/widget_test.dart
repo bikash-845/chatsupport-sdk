@@ -14,6 +14,8 @@
 /// it.
 library;
 
+import 'package:dhaam_chat/dhaam_chat.dart'
+    show InvalidPublishableKeyError, PublishableKey;
 import 'package:dhaam_chat_flutter_example/example_config.dart';
 import 'package:dhaam_chat_flutter_example/main.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -90,5 +92,50 @@ void main() {
 
     expect(find.textContaining('flutter run'), findsOneWidget);
     expect(find.textContaining('--dart-define=$kWsUrlKey'), findsOneWidget);
+  });
+
+  /// The launch command is copied verbatim. Its placeholder has to be a
+  /// prefix the SDK actually accepts.
+  ///
+  /// It was `pk_test_…`, which `PublishableKey.parse` refuses — so the one
+  /// person most likely to copy this line, somebody running the SDK for the
+  /// first time, was sent to look for a key that does not exist, and the
+  /// refusal they then got named a third string. The two assertions here are
+  /// the placeholder and the reason it had to change; the second is what
+  /// stops the old spelling being restored as a harmless-looking tidy-up.
+  testWidgets('the launch command names a prefix the SDK will accept', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      const ExampleApp(
+        config: ExampleConfigIncomplete(<ConfigProblem>[
+          ConfigProblem(kPublishableKeyKey, 'not set.'),
+        ]),
+      ),
+    );
+
+    expect(
+      find.textContaining('--dart-define=$kPublishableKeyKey=dhp_test_'),
+      findsOneWidget,
+    );
+
+    // Why that spelling and not the previous one.
+    expect(PublishableKey.parse('dhp_test_yourkey'), isA<PublishableKey>());
+    expect(
+      () => PublishableKey.parse('pk_test_yourkey'),
+      throwsA(isA<InvalidPublishableKeyError>()),
+    );
+  });
+
+  test('the missing-key problem names the prefixes the parser accepts', () {
+    final ExampleConfigIncomplete config =
+        readExampleConfig() as ExampleConfigIncomplete;
+    final ConfigProblem problem = config.problems
+        .firstWhere((ConfigProblem p) => p.key == kPublishableKeyKey);
+
+    // Same rule as the launch command: the sentence a person reads and the
+    // string the parser wants must be one fact, not two.
+    expect(problem.detail, contains('dhp_live_'));
+    expect(problem.detail, contains('dhp_test_'));
   });
 }

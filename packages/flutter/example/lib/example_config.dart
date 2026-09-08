@@ -12,7 +12,7 @@
 ///
 /// **There are no defaults.** Every key below defaults to the empty string,
 /// which this file then reports as missing. A plausible-looking placeholder —
-/// `https://chat.example.com`, `pk_test_abc123` — would be worse than no
+/// `https://chat.example.com`, `dhp_test_abc123` — would be worse than no
 /// default at all: the app would start, the socket would fail somewhere deep
 /// in reconnect backoff, and the person testing by hand would be debugging a
 /// value nobody typed.
@@ -247,7 +247,14 @@ PublishableKey? _validatePublishableKey(List<ConfigProblem> problems) {
     problems.add(
       const ConfigProblem(
         kPublishableKeyKey,
-        'not set. Expected the tenant publishable key (pk_live_… or pk_test_…).',
+        // The prefixes `keys.dart` actually accepts. It refuses `pk_`
+        // deliberately — a bare `pk_test_` is Stripe's shape, and secret
+        // scanners report such a key as a Stripe key — so a placeholder
+        // spelled `pk_test_…` sends someone to look for a key that is not
+        // the one they have, and the SDK's own refusal then names a third
+        // string. See `keys.dart`'s closing note on the naming decision.
+        'not set. Expected the tenant publishable key '
+        '(dhp_live_… or dhp_test_…).',
       ),
     );
     return null;

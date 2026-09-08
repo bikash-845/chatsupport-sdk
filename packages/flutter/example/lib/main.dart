@@ -169,7 +169,7 @@ class _SetupRequiredPage extends StatelessWidget {
 const String _kRunCommand = 'flutter run \\\n'
     '  --dart-define=$kWsUrlKey=wss://chat.your-host.example \\\n'
     '  --dart-define=$kApiUrlKey=https://api.your-host.example \\\n'
-    '  --dart-define=$kPublishableKeyKey=pk_test_… \\\n'
+    '  --dart-define=$kPublishableKeyKey=dhp_test_… \\\n'
     '  --dart-define=$kAccessTokenKey=…';
 
 class _CodeBlock extends StatelessWidget {

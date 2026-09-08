@@ -109,7 +109,7 @@ flutter pub get
 flutter run \
   --dart-define=DHAAM_WS_URL=wss://chat.your-host.example \
   --dart-define=DHAAM_API_URL=https://api.your-host.example \
-  --dart-define=DHAAM_PUBLISHABLE_KEY=pk_test_yourkey \
+  --dart-define=DHAAM_PUBLISHABLE_KEY=dhp_test_yourkey \
   --dart-define=DHAAM_ACCESS_TOKEN=your.jwt.here
 ```
 
@@ -131,7 +131,7 @@ of those two ways is least legible.
 |---|---|---|
 | `DHAAM_WS_URL` | yes | The WebSocket endpoint. `ws://` or `wss://`. Goes to `ChatClient(wsUrl:)`. |
 | `DHAAM_API_URL` | yes | The REST **origin**, `http://` or `https://`, **with no path** — `RestClient`, `fetchRemoteConfig` and `fetchIpWatermark` each append `/chat-services/api/v1` themselves. Passing a value that already carries the base path builds a doubled one, and the symptom (every REST call 404s while the socket works fine) is hard to read backwards, so the example refuses it up front. |
-| `DHAAM_PUBLISHABLE_KEY` | yes | The tenant key, `pk_live_…` or `pk_test_…`. Public by design: it identifies a tenant and grants nothing. |
+| `DHAAM_PUBLISHABLE_KEY` | yes | The tenant key, `dhp_live_…` or `dhp_test_…` — **not** `pk_…`, which `PublishableKey.parse` refuses (a bare `pk_test_` is Stripe's shape, and secret scanners report such a key as a Stripe key). Public by design: it identifies a tenant and grants nothing. |
 | `DHAAM_ACCESS_TOKEN` | yes | A user JWT for this run. **See the warning below.** |
 | `DHAAM_SESSION_ID` | no | A conversation to open on. Unset lands on Home, which is what a visitor arriving fresh sees. |
 
