@@ -63,6 +63,7 @@ Future<_Recorder> _pump(
   WidgetTester tester,
   MessageListInputs inputs, {
   MessageListPresenter? presenter,
+
   /// `false` for anything that renders the typing bubble. Its dots loop
   /// forever by design, so `pumpAndSettle` — which pumps until no frame is
   /// scheduled — never returns.

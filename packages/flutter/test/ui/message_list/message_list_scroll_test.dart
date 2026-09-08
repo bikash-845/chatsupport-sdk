@@ -206,10 +206,6 @@ void main() {
           messages: <ChatMessage>[for (int i = 0; i < 40; i += 1) _msg(i)],
         ),
       );
-      final ScrollableState before =
-          tester.state<ScrollableState>(find.byType(Scrollable));
-      final double extentBefore = before.position.maxScrollExtent;
-
       harness.supply(
         MessageListInputs(
           messages: <ChatMessage>[for (int i = 0; i < 40; i += 1) _msg(i)],
@@ -221,15 +217,24 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      expect(find.byType(TypingIndicator), findsOneWidget);
-      // The list itself got longer. This is the whole difference between a
-      // bubble in the transcript and a band bolted underneath it.
+      // INSIDE the scrollable, not beside it. A band bolted under the list
+      // also grows `maxScrollExtent` — it shrinks the viewport — so extent
+      // alone cannot tell the two apart; containment can.
       expect(
-        tester
-            .state<ScrollableState>(find.byType(Scrollable))
-            .position
-            .maxScrollExtent,
-        greaterThan(extentBefore),
+        find.descendant(
+          of: find.byType(Scrollable),
+          matching: find.byType(TypingIndicator),
+        ),
+        findsOneWidget,
+      );
+
+      // And after the last message, not before it: `message-list.ts` keeps
+      // the bubble last so it reads as the next message being written.
+      final double lastMessageBottom =
+          tester.getRect(find.text('message number 39')).bottom;
+      expect(
+        tester.getRect(find.byType(TypingIndicator)).top,
+        greaterThanOrEqualTo(lastMessageBottom),
       );
     });
 
