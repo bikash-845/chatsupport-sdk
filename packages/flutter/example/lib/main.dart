@@ -31,7 +31,7 @@ library;
 import 'dart:async';
 
 import 'package:dhaam_chat/dhaam_chat.dart'
-    show ChatClient, ErrorCode, ErrorPayload;
+    show ChatClient, ContactGeo, ErrorCode, ErrorPayload;
 import 'package:dhaam_chat_flutter/dhaam_chat_flutter.dart'
     show
         ChatClientAdapter,
@@ -48,6 +48,7 @@ import 'package:dhaam_chat_flutter/dhaam_chat_flutter.dart'
         restIssueReporter;
 import 'package:dhaam_chat_rest/dhaam_chat_rest.dart'
     show RestClient, RestContactInfo, captureContactInfo;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -266,7 +267,9 @@ class _HostHomePageState extends State<_HostHomePage> {
   bool _configSettled = false;
 
   /// Whatever `captureContactInfo` managed to collect, merged as it arrives.
-  RestContactInfo _contact = const RestContactInfo();
+  /// See `_ChatPanelPage.contact` for why this is a notifier.
+  final ValueNotifier<RestContactInfo> _contact =
+      ValueNotifier<RestContactInfo>(const RestContactInfo());
 
   /// Which visitor the next panel will be opened as.
   ///
@@ -276,7 +279,18 @@ class _HostHomePageState extends State<_HostHomePage> {
   /// `ChatWidgetCubit` takes the answer once, at construction. Flipping this
   /// switch therefore changes the NEXT panel, and the panel is built fresh on
   /// every open, so no rebuild of the app is needed to see both modes.
-  ExampleVisitor _visitor = ExampleVisitor.guest;
+  /// Starts IDENTIFIED, not as a guest.
+  ///
+  /// Whoever runs this supplied a real DHAAM_ACCESS_TOKEN for a real user, so
+  /// "signed in" is what they are actually testing. Defaulting to guest made
+  /// two correct behaviours look like bugs: the pre-chat form appeared (right,
+  /// for a guest, when the merchant published `preChatEnabled`) and the
+  /// conversation list came back empty (also right -- `listSessions` answers a
+  /// guest with `[]`, and that emptiness IS the guest signal, not a failure).
+  ///
+  /// The toggle still switches to guest, which is the interesting comparison;
+  /// it just is not the state someone lands in by accident.
+  ExampleVisitor _visitor = ExampleVisitor.identified;
 
   @override
   void initState() {
@@ -332,14 +346,13 @@ class _HostHomePageState extends State<_HostHomePage> {
         // claims to be whole.
         sink: (RestContactInfo info) {
           if (!mounted) return;
-          setState(() {
-            _contact = RestContactInfo(
-              ip: info.ip ?? _contact.ip,
-              ipWatermark: info.ipWatermark ?? _contact.ipWatermark,
-              userAgent: info.userAgent ?? _contact.userAgent,
-              geo: info.geo ?? _contact.geo,
-            );
-          });
+          final RestContactInfo held = _contact.value;
+          _contact.value = RestContactInfo(
+            ip: info.ip ?? held.ip,
+            ipWatermark: info.ipWatermark ?? held.ipWatermark,
+            userAgent: info.userAgent ?? held.userAgent,
+            geo: info.geo ?? held.geo,
+          );
         },
       ),
     );
@@ -355,6 +368,7 @@ class _HostHomePageState extends State<_HostHomePage> {
           // switch above governs the panel about to open rather than the one
           // the app happened to start with.
           identity: exampleIdentity(_visitor),
+          contact: _contact,
           // Everything REST the panel wires hangs off this one client: the
           // session actions, the issue reporter, the attachment uploader and
           // the session-list fetch. A second client here would open a second
@@ -416,7 +430,11 @@ class _HostHomePageState extends State<_HostHomePage> {
                     ? '${kExampleProfile.name} <${kExampleProfile.email}>'
                     : 'absent',
               ),
-              _Fact('→ isGuest', '${exampleIdentity(_visitor).isGuest}'),
+              _Fact(
+                '→ isGuest',
+                '${exampleIdentity(_visitor).isGuest}',
+                key: const Key('host.isGuestFact'),
+              ),
               const _Fact(
                 'Pre-chat form',
                 'asked of guests only, and only when the merchant enabled it '
@@ -482,17 +500,17 @@ class _HostHomePageState extends State<_HostHomePage> {
           _Section(
             title: 'Contact info',
             children: <Widget>[
-              _Fact('User agent', _contact.userAgent ?? '—'),
+              _Fact('User agent', _contact.value.userAgent ?? '—'),
               // Unauthenticated, no publishable key, `credentials: omit`. It
               // is also the cheapest proof that DHAAM_API_URL is reachable at
               // all, which is why it earns a row here.
-              _Fact('IP (GET /ip-watermark)', _contact.ip ?? '—'),
-              _Fact('Watermark', _contact.ipWatermark ?? '—'),
+              _Fact('IP (GET /ip-watermark)', _contact.value.ip ?? '—'),
+              _Fact('Watermark', _contact.value.ipWatermark ?? '—'),
               _Fact(
                 'Geolocation',
-                _contact.geo == null
+                _contact.value.geo == null
                     ? '— (probe declines; see seams.dart)'
-                    : '${_contact.geo!.lat}, ${_contact.geo!.lng}',
+                    : '${_contact.value.geo!.lat}, ${_contact.value.geo!.lng}',
               ),
             ],
           ),
@@ -520,6 +538,7 @@ class _ChatPanelPage extends StatefulWidget {
     required this.initialConfig,
     required this.identity,
     required this.rest,
+    required this.contact,
   });
 
   final ExampleConfigReady config;
@@ -534,6 +553,16 @@ class _ChatPanelPage extends StatefulWidget {
   /// it — the state that created it does, which is the same ownership rule
   /// `ChatWidget` follows by not closing the Cubit it was handed.
   final RestClient rest;
+
+  /// What `captureContactInfo` has found so far, as it finds it.
+  ///
+  /// A notifier rather than a value because the capture is deliberately not
+  /// awaited: the user agent is known synchronously, the IP watermark lands a
+  /// round trip later, and geolocation later still — or never. The panel is
+  /// usually already open by then, and this route does not rebuild from the
+  /// host's `setState`, so a plain value would freeze whatever happened to be
+  /// known at the moment the panel was pushed.
+  final ValueListenable<RestContactInfo> contact;
 
   @override
   State<_ChatPanelPage> createState() => _ChatPanelPageState();
@@ -560,6 +589,9 @@ class _ChatPanelPageState extends State<_ChatPanelPage> {
   /// has been torn down, which is the refresher's own documented reason for
   /// having one.
   late final SessionListRefresher _sessions;
+
+  /// Detached in [dispose]; the notifier outlives this route.
+  VoidCallback? _contactListener;
 
   /// The four methods the end-of-conversation surfaces need, plus the hook
   /// that refreshes the list when one of them lands. Built here rather than
@@ -599,6 +631,36 @@ class _ChatPanelPageState extends State<_ChatPanelPage> {
       // construction. Recorded rather than papered over.
       localParticipantId: kExampleUserId,
     );
+
+    // ── Hand the captured contact info to the client ────────────────────
+    //
+    // The missing half of the reported "IP address / Device / Location are
+    // not coming". `captureContactInfo` was collecting all three and this app
+    // was only DISPLAYING them: nothing called `setContactInfo`, so the
+    // `connection.hello` carried none of it and the agent console showed
+    // dashes for every visitor.
+    //
+    // Listened to rather than read once, because the capture is deliberately
+    // not awaited and lands in pieces — user agent synchronously, the IP
+    // watermark a round trip later, geolocation later or never.
+    // `setContactInfo` merges into a record read at socket-open time, so a
+    // late arrival rides the next connect rather than being lost; pushing
+    // each piece as it lands is what gets the earliest ones onto the FIRST
+    // hello.
+    void pushContact() {
+      final RestContactInfo c = widget.contact.value;
+      _client.setContactInfo(
+        ip: c.ip,
+        ipWatermark: c.ipWatermark,
+        userAgent: c.userAgent,
+        geo:
+            c.geo == null ? null : ContactGeo(lat: c.geo!.lat, lng: c.geo!.lng),
+      );
+    }
+
+    pushContact();
+    widget.contact.addListener(pushContact);
+    _contactListener = pushContact;
 
     // Built before the Cubit because the Cubit takes the actions, and the
     // actions take the refresh hook. `late final _sessions` is what lets the
@@ -692,6 +754,12 @@ class _ChatPanelPageState extends State<_ChatPanelPage> {
 
   @override
   void dispose() {
+    // Detached first: the notifier belongs to the host screen and outlives
+    // this route, so a listener left attached would call setContactInfo on a
+    // disposed client the next time a capture lands.
+    final VoidCallback? listener = _contactListener;
+    if (listener != null) widget.contact.removeListener(listener);
+
     // Created here, closed here. `ChatWidget` will not do it — it was handed
     // the Cubit through `BlocProvider.value`, which provides an existing
     // instance without taking over its lifecycle.
@@ -868,7 +936,7 @@ class _Section extends StatelessWidget {
 }
 
 class _Fact extends StatelessWidget {
-  const _Fact(this.label, this.value);
+  const _Fact(this.label, this.value, {super.key});
 
   final String label;
   final String value;

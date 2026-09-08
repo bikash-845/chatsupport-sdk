@@ -112,25 +112,40 @@ void main() {
     await tester.pumpWidget(ExampleApp(config: _readyConfig()));
     await tester.pump();
 
-    // Guest is the landing state: a merchant's app has not authenticated
-    // anybody until it says so.
-    expect(find.text('true'), findsOneWidget);
-    expect(find.text('absent'), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('host.identifiedSwitch')));
-    await tester.pump();
-
+    // IDENTIFIED is the landing state, deliberately. Whoever runs this
+    // supplied a real access token for a real user, so signed-in is what they
+    // are testing. Landing on guest made two correct behaviours read as bugs:
+    // the pre-chat form appearing (right, for a guest, once the merchant
+    // publishes preChatEnabled) and an empty conversation list (also right --
+    // `listSessions` answers a guest with `[]`, and that emptiness IS the
+    // guest signal).
     expect(find.text('false'), findsOneWidget);
     expect(find.text('absent'), findsNothing);
     expect(find.textContaining(kExampleProfile.email!), findsOneWidget);
 
+    // The toggle still reaches guest — that comparison is the point of the
+    // control; it just is not where someone lands by accident.
+    // Scrolled into view first: the host screen has grown past one viewport,
+    // and `tap` on an off-screen widget does not toggle anything -- it fails
+    // by finding nothing changed, which reads as a broken switch rather than
+    // a test that never pressed it.
+    final Finder switchTile = find.byKey(const Key('host.identifiedSwitch'));
+    await tester.ensureVisible(switchTile);
+    await tester.pumpAndSettle();
+    await tester.tap(switchTile);
+    await tester.pump();
+
+    // Targeted by key, because `find.text` cannot see a ListView child that
+    // has not been built — after scrolling to the switch, asserting on bare
+    // text measures the scroll position rather than the toggle.
+    final Finder isGuestFact = find.byKey(const Key('host.isGuestFact'));
+    await tester.ensureVisible(isGuestFact);
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: isGuestFact, matching: find.text('true')),
+        findsOneWidget);
+
     // The id is on screen in BOTH states and is the same string — the fact
     // the section exists to teach.
-    expect(find.text(kExampleUserId), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('host.identifiedSwitch')));
-    await tester.pump();
-    expect(find.text('true'), findsOneWidget);
     expect(find.text(kExampleUserId), findsOneWidget);
   });
 }
