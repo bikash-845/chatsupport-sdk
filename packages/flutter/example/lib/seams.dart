@@ -6,9 +6,14 @@
 /// Every one of these is a function type or a one-method interface that the
 /// package takes as a parameter rather than constructing for itself, so that
 /// its own tests can pass a closure and never touch a platform channel or a
-/// network. That property is worth having and it has a cost: nothing in the
-/// package's 930 tests ever exercises the REAL implementations together. This
+/// network. That property is worth having and it has a cost: not one of the
+/// package's tests ever exercises the REAL implementations together. This
 /// file is the first place they meet.
+///
+/// The count used to be written out here and had drifted — it said 930 against
+/// a suite of 1245 — so it is not written out any more. A number nobody
+/// reruns is a number that is wrong, and this file's whole argument is that a
+/// claim which is not rechecked stops being true quietly.
 ///
 /// Each declaration below is CONSTRUCTED, not described. If
 /// `filePickerAttachmentPicker` ever stops satisfying `AttachmentPicker`, or

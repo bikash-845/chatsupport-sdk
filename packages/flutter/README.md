@@ -325,6 +325,15 @@ module rather than a gap. `SessionPickerScreen` looks like superseded code:
 Home and Messages read `state.sessionSummaries` directly, expressing the same
 `sessions.length > 0` gate as rows rather than as a surface.
 
+`state.sessionSummaries` itself is no longer always empty. It is populated by
+whoever calls `ChatWidgetCubit.updateSessionSummaries`, which this package
+cannot do for itself — `WidgetChatClient` is the WebSocket slice and
+`dhaam_chat` cannot list sessions at all — so the page is the host's to fetch.
+`packages/flutter/example/lib/session_list.dart` is a worked example of that,
+over `dhaam_chat_rest`'s `listSessions` and driven by the package's own
+`SessionListRefresher`. A host that renders nothing here has a Messages screen
+with nothing to draw, which is a wiring gap and not a parity one.
+
 **The inline report-issue entry point is not ported.** `widget.ts` opens the
 report form from two places — the header menu (`:858`, ported) and an inline
 button on the seam between the transcript and the composer (`:1401`). Only
