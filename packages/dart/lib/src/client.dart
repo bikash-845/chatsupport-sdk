@@ -162,6 +162,41 @@ class _FailedSend {
 ///  * REST: pagination, session history, `pastSessions`. [gaps] tells a host
 ///    exactly which `seq` span to refetch, and refetching is its job for now.
 class ChatClient {
+  /// Creates a client.
+  ///
+  /// ── `localParticipantId`, and why the SDK has to be told ──────────────
+  ///
+  /// Who this client's own participant is, used to drop the server's echo of
+  /// our own `typing.start` so the customer does not watch a "someone is
+  /// typing" indicator follow their own keystrokes. Null — the default —
+  /// disables the filter, which is the honest behaviour for a host that has
+  /// not named anybody rather than a guess made on their behalf.
+  ///
+  /// It is a parameter and not something this client works out, because
+  /// nothing on the wire carries the answer. `connection.ack` brings a
+  /// [SessionSnapshot] whose `participants` are [ParticipantSnapshot]s, and a
+  /// participant row has `participantId`, `type`, `lastReadAt` and
+  /// `displayName` — no "this one is you" marker anywhere on it. The
+  /// handshake says who is IN the session; it cannot say which of them we
+  /// are. Neither can anything else here: the hello frame sends no
+  /// participant id, the outbound typing payload is deliberately empty
+  /// because the SERVER attributes it (`typingPayload`), our own optimistic
+  /// echo carries `senderId: ''` for the same reason, and the server's
+  /// `message.send` ack reports a sender TYPE without a sender id.
+  ///
+  /// Two guesses suggest themselves and both are refused. Adopting the
+  /// snapshot's lone `CUSTOMER` row is wrong in precisely the case that
+  /// matters — an agent-side embed, where that row is somebody else — and
+  /// core, which has that code
+  /// (`packages/core/src/presence/watermarks.ts:220`), overrides it at both
+  /// of its real call sites for that reason. Inferring from `senderType` is
+  /// the heuristic `ticks.ts` explicitly refuses. So the id is known only to
+  /// the host application that configured the SDK, and only it can say.
+  ///
+  /// A Flutter host already holds this value: `ChatWidgetState`'s
+  /// `localParticipantId`, taken from `ChatIdentity.userId` — the port of
+  /// `widget.ts:524`, which reads `config.identity.userId` and likewise never
+  /// consults the ack. Passing that same value here is the whole wiring.
   ChatClient({
     required Uri wsUrl,
     required PublishableKey publishableKey,
@@ -170,6 +205,7 @@ class ChatClient {
     Scheduler scheduler = const SystemScheduler(),
     BackoffPolicy backoffPolicy = const BackoffPolicy(),
     UlidGenerator? ulids,
+    String? localParticipantId,
   })  : _scheduler = scheduler,
         _connection = ConnectionController(
           wsUrl: wsUrl,
@@ -183,6 +219,7 @@ class ChatClient {
         ) {
     _typingController = TypingController(
       scheduler: scheduler,
+      localParticipantId: localParticipantId,
       onChanged: (String participantId, {required bool isTyping}) => _emit(
         _typing,
         TypingEvent(isTyping: isTyping, participantId: participantId),

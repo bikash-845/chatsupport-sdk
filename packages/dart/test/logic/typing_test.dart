@@ -31,11 +31,14 @@ void main() {
   late FakeScheduler scheduler;
   late List<_Change> changes;
 
-  TypingController build({Duration? remoteTimeout}) => TypingController(
+  TypingController build(
+          {Duration? remoteTimeout, String? localParticipantId}) =>
+      TypingController(
         scheduler: scheduler,
         onChanged: (String id, {required bool isTyping}) =>
             changes.add(_Change(id, isTyping: isTyping)),
         remoteTimeout: remoteTimeout ?? kRemoteTypingTimeout,
+        localParticipantId: localParticipantId,
       );
 
   setUp(() {
@@ -140,6 +143,57 @@ void main() {
 
       expect(changes, isEmpty);
       expect(scheduler.pending, isZero);
+    });
+  });
+
+  group('self-echo filter', () {
+    test('a server that echoes our own typing.start does not light us up', () {
+      // §7.3 does not say whether the server relays a start back to the
+      // sender. If it does and we apply it, the customer watches a "someone
+      // is typing" bubble follow their own keystrokes in their own
+      // transcript.
+      final TypingController controller = build(localParticipantId: 'me');
+      controller.applyStart('me');
+
+      expect(changes, isEmpty);
+      expect(controller.typers, isEmpty);
+      expect(
+        scheduler.pending,
+        isZero,
+        reason: 'a filtered frame must not arm a timer either',
+      );
+    });
+
+    test('our own echoed stop is dropped too', () {
+      final TypingController controller = build(localParticipantId: 'me');
+      controller.applyStop('me');
+      expect(changes, isEmpty);
+    });
+
+    test('everybody else still comes through', () {
+      // The filter must be an equality test on one id, not a mute button.
+      final TypingController controller = build(localParticipantId: 'me');
+      controller
+        ..applyStart('me')
+        ..applyStart('agent');
+
+      expect(controller.typers, equals(<String>['agent']));
+      expect(
+        changes,
+        equals(<_Change>[const _Change('agent', isTyping: true)]),
+      );
+    });
+
+    test('a host that names nobody filters nothing', () {
+      // Null disables the filter (`typing.ts:184`) rather than guessing at an
+      // id on the host's behalf.
+      final TypingController controller = build();
+      controller.applyStart('me');
+
+      expect(
+        changes,
+        equals(<_Change>[const _Change('me', isTyping: true)]),
+      );
     });
   });
 

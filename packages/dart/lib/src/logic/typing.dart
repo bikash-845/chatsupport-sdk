@@ -120,9 +120,11 @@ class TypingController {
     required Scheduler scheduler,
     required TypingStateChanged onChanged,
     Duration remoteTimeout = kRemoteTypingTimeout,
+    String? localParticipantId,
   })  : _scheduler = scheduler,
         _onChanged = onChanged,
-        _remoteTimeout = remoteTimeout {
+        _remoteTimeout = remoteTimeout,
+        _localParticipantId = localParticipantId {
     assertTypingTimings(
       remoteTimeout: remoteTimeout,
       startInterval: kTypingStartInterval,
@@ -133,6 +135,21 @@ class TypingController {
   final Scheduler _scheduler;
   final TypingStateChanged _onChanged;
   final Duration _remoteTimeout;
+
+  /// Whose relayed typing frames are this client's own echo, or null when the
+  /// host has not said — see `ChatClient.localParticipantId` for why this can
+  /// only ever be told to us. Null disables the filter, matching
+  /// `typing.ts:184` ("Pass `null` to disable filtering").
+  ///
+  /// Immutable, unlike the reference's, which carries a `setLocalParticipantId`
+  /// (`typing.ts:186`). That setter exists in core for one reason: its
+  /// `WatermarkTracker` can ADOPT an id later by guessing the session
+  /// snapshot's lone `CUSTOMER` participant is us
+  /// (`packages/core/src/presence/watermarks.ts:220`). Core overrides that
+  /// guess at both of its real call sites, and this package does not port it
+  /// at all, so nothing here can ever learn the id after construction and a
+  /// setter would be a seam with nothing on the other side of it.
+  final String? _localParticipantId;
 
   /// Who is typing, mapped to the canceller for their auto-clear.
   ///
@@ -157,8 +174,16 @@ class TypingController {
   /// whenever the server relays typing onward (see `typingPayload`, which
   /// sends an empty `d` precisely because the server attributes it), so a
   /// relayed frame without one is malformed rather than merely terse.
+  /// A frame attributed to US is dropped as self-echo (`typing.ts:205`). §7.3
+  /// does not say whether the server relays a `typing.start` back to the
+  /// participant who sent it. If it does, and this applied it, the customer
+  /// would watch a "someone is typing" bubble track their own keystrokes in
+  /// their own transcript. Filtering on our own id makes the client correct
+  /// under EITHER server behaviour rather than depending on the one §7.3
+  /// declines to specify.
   void applyStart(String? participantId) {
     if (participantId == null) return;
+    if (participantId == _localParticipantId) return;
 
     final bool wasTyping = _typers.containsKey(participantId);
     _arm(participantId);
@@ -178,6 +203,11 @@ class TypingController {
   /// already timed the same participant out.
   void applyStop(String? participantId) {
     if (participantId == null) return;
+    // Redundant today — a self-echoed start never entered the map, so the
+    // membership check below would refuse this anyway — and kept because that
+    // redundancy is exactly what stops "the stop path is correct" from
+    // silently depending on "the id never changes after construction".
+    if (participantId == _localParticipantId) return;
     if (!_typers.containsKey(participantId)) return;
 
     _cancel(participantId);

@@ -69,13 +69,14 @@ String deliveredJson({int deliveredUpToSeq = 7}) =>
     });
 
 class Harness {
-  Harness() {
+  Harness({String? localParticipantId}) {
     scheduler = FakeScheduler();
     client = ChatClient(
       wsUrl: Uri.parse('wss://example.test/v2'),
       publishableKey: testKey,
       getToken: () async => 'jwt',
       scheduler: scheduler,
+      localParticipantId: localParticipantId,
       socketFactory: (Uri _) async {
         final FakeSocket socket = FakeSocket();
         sockets.add(socket);
@@ -325,6 +326,30 @@ void main() {
         reason: 'no typing.stop was ever delivered',
       );
       expect(events.last.participantId, equals('p1'));
+
+      await harness.client.dispose();
+    });
+
+    test('the server echoing our own typing.start never reaches the stream',
+        () async {
+      // A server that relays typing back to its sender would otherwise light
+      // up "someone is typing" in the customer's own transcript while they
+      // type. §7.3 does not say whether it does, so the client is made
+      // correct under either behaviour.
+      final Harness harness = Harness(localParticipantId: 'me');
+      await harness.connected();
+
+      final List<TypingEvent> events = <TypingEvent>[];
+      harness.client.typing.listen(events.add);
+
+      harness.socket.deliver(typingJson('typing.start', 'me'));
+      await flush();
+      expect(events, isEmpty);
+
+      // ...while a real agent still gets through.
+      harness.socket.deliver(typingJson('typing.start', 'agent'));
+      await flush();
+      expect(events.single.participantId, equals('agent'));
 
       await harness.client.dispose();
     });
