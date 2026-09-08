@@ -19,9 +19,9 @@ env:
   # These catch regressions that DELETE tests. Counts verified by filtering out
   # synthetic "loading <file>" testStart entries from --reporter json output,
   # then comparing against --reporter compact final count (+N).
-  DART_TEST_FLOOR: '331'
+  DART_TEST_FLOOR: '366'
   DART_REST_TEST_FLOOR: '464'
-  FLUTTER_TEST_FLOOR: '1245'
+  FLUTTER_TEST_FLOOR: '1275'
 
 jobs:
   # ---------------------------------------------------------------------------

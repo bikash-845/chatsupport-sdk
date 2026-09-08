@@ -472,8 +472,8 @@ class _HostHomePageState extends State<_HostHomePage> {
                 'Uploads enabled (paperclip)',
                 _configSettled
                     ? '${(_config ?? defaultRemoteConfig).fileUploads}'
-                          '${_config == null ? " (defaultRemoteConfig — the "
-                              "fetch got no answer)" : " (published)"}'
+                        '${_config == null ? " (defaultRemoteConfig — the "
+                            "fetch got no answer)" : " (published)"}'
                     : 'not settled — Composer.fileUploads defaults to false '
                         'until it is, so a paperclip may appear a moment late',
               ),
@@ -586,6 +586,18 @@ class _ChatPanelPageState extends State<_ChatPanelPage> {
       // site — orchestrator decision D1, visible here as one argument passed
       // twice rather than two callbacks kept in step.
       getToken: exampleTokenProvider(widget.config.accessToken),
+      // Who "we" are, so a server that echoes our own `typing.start` back
+      // does not light up "you are typing" in the customer's own transcript.
+      // Null disables the filter, which is the honest default for a host that
+      // named nobody -- the wire carries no "this one is you" marker, so the
+      // client cannot derive it.
+      //
+      // NOTE the duplication: the same id also reaches the Cubit as
+      // `identity: widget.identity` below. Two copies that can drift is the
+      // shape this codebase warns about everywhere else, and closing it means
+      // either the adapter taking the identity or the Cubit owning client
+      // construction. Recorded rather than papered over.
+      localParticipantId: kExampleUserId,
     );
 
     // Built before the Cubit because the Cubit takes the actions, and the
