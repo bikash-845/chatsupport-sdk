@@ -18,6 +18,7 @@ void main() {
     String? privacyUrl,
     bool reportIssue = true,
     bool muted = false,
+    bool sound = true,
     ValueChanged<bool>? onMuteChange,
     VoidCallback? onStartNew,
     VoidCallback? onEndConversation,
@@ -34,6 +35,7 @@ void main() {
                 privacyUrl: privacyUrl,
                 reportIssue: reportIssue,
                 muted: muted,
+                sound: sound,
                 onStartNew: onStartNew ?? () {},
                 onEndConversation: onEndConversation ?? () {},
                 onReportIssue: onReportIssue ?? () {},
@@ -95,6 +97,7 @@ void main() {
                       privacyUrl: null,
                       reportIssue: true,
                       muted: muted,
+                      sound: true,
                       onStartNew: () {},
                       onEndConversation: () {},
                       onReportIssue: () {},
@@ -203,6 +206,54 @@ void main() {
     );
   });
 
+  // ── The mute row is backed by the merchant's chime, or it is not there ──
+  //
+  // It used to be the one row offered unconditionally. On a tenant that
+  // published no `sound` — the DEFAULT, since an unreadable config is not
+  // consent to make noise — `Chime` refuses before it ever reads `muted`, so
+  // pressing this row flipped a label and changed nothing anyone could hear.
+  // That is what "mute notification and unmute notification not working" was.
+  group('mute is offered only when there is a chime to silence', () {
+    test('the pure function drops it with no published sound', () {
+      expect(
+        headerMenuEntries(
+          canEnd: true,
+          privacyUrl: null,
+          reportIssue: true,
+          muted: false,
+          sound: false,
+        ).map((HeaderMenuEntry e) => e.label),
+        <String>[
+          'Start new conversation',
+          'End conversation',
+          'Report an issue'
+        ],
+      );
+    });
+
+    testWidgets('and so does the menu', (WidgetTester tester) async {
+      await mount(tester, sound: false);
+      await openMenu(tester);
+      expect(labels(tester), isNot(contains('Mute notifications')));
+    });
+
+    testWidgets('including for a visitor who had already muted it',
+        (WidgetTester tester) async {
+      // A remembered `muted: true` must not resurrect a row the merchant does
+      // not back — the state is about a chime that no longer exists.
+      await mount(tester, sound: false, muted: true);
+      await openMenu(tester);
+      expect(labels(tester), isNot(contains('Unmute notifications')));
+    });
+
+    testWidgets('present the moment the merchant publishes one',
+        (WidgetTester tester) async {
+      await mount(tester, sound: true);
+      await openMenu(tester);
+      expect(labels(tester), contains('Mute notifications'));
+    });
+  });
+
   // ── Nothing in this menu is decorative ────────────────────────────────
   group('offers only what is actually backed', () {
     test('the entry list is decided by a pure function, off any widget tree',
@@ -213,6 +264,7 @@ void main() {
           privacyUrl: null,
           reportIssue: false,
           muted: false,
+          sound: true,
         ).map((HeaderMenuEntry e) => e.label),
         <String>['Mute notifications', 'Start new conversation'],
       );
@@ -309,6 +361,7 @@ void main() {
         privacyUrl: '  https://acme.test/privacy  ',
         reportIssue: false,
         muted: false,
+        sound: true,
       ).last;
       expect(privacy.action, HeaderMenuAction.privacy);
       // Trimmed by the validator, not by this module — one answer, one place.

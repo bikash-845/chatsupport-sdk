@@ -16,7 +16,10 @@
 ///                         or gives it back. Per DEVICE, not per tenant: it
 ///                         is this visitor's preference about noise on their
 ///                         own machine. The label states the ACTION and
-///                         therefore flips — see [muteLabel].
+///                         therefore flips — see [muteLabel]. HIDDEN when the
+///                         merchant published no chime, for the same reason
+///                         Privacy is hidden without a URL — see [sound] on
+///                         [headerMenuEntries].
 ///   Start new conversation → the new-conversation flow.
 ///   End conversation    → `POST /chat/sessions/:id/close`, customer-owned.
 ///   Report an issue     → `report_issue_form.dart`, filing a real ticket.
@@ -140,7 +143,7 @@ class HeaderMenuEntry extends Equatable {
 
 /// The rows this menu offers right now, in the reference's order.
 ///
-/// A pure function: the whole visibility rule in one place, decided from four
+/// A pure function: the whole visibility rule in one place, decided from five
 /// facts, with no widget and no `BuildContext`. Every "is this item backed"
 /// question is answered here and nowhere else, which is what stops the menu
 /// and the screen behind it from disagreeing about whether a feature exists.
@@ -155,11 +158,41 @@ class HeaderMenuEntry extends Equatable {
 /// unlikely.
 ///
 /// [reportIssue] — whether the merchant offers the report form at all.
+///
+/// [sound] — `RemoteConfig.sound`, the merchant's decision that a chime
+/// exists at all. The mute row is the ONE thing this menu offers that only
+/// has an effect through [Chime], and `chime.dart` refuses on `!sound` alone
+/// — before it ever looks at [muted]. So on a tenant that published no chime
+/// (and `sound` DEFAULTS to false, deliberately: an unreadable config is not
+/// consent to make noise), muting and unmuting were both no-ops, and the row
+/// was the only unbacked item in a menu whose whole rule is that there are
+/// none. It reads as a feature, the customer presses it, the label flips, and
+/// nothing about their device changes — which is the "promise the product
+/// breaks in front of the customer" this module's header names, arrived at
+/// from the other direction.
+///
+/// This is the merchant's half and it is the half this package can know.
+/// Whether the DEVICE can make the sound is a separate question that no
+/// caller here can answer: the default [ChimePlayer] is [SystemSound], which
+/// Flutter documents as ignored on Android, iOS and web, so a host on those
+/// platforms has to supply its own player. Hiding the row on that basis would
+/// mean second-guessing a player a host may well have wired — so the gate is
+/// the one fact that is actually published.
+///
+/// Required, with no default, and deliberately: this and [HeaderMenu.sound]
+/// are a breaking change for any caller outside this repo, and that is the
+/// intended signal. A `sound = true` default would read as "assume the
+/// merchant published a chime", which is the exact assumption
+/// `RemoteConfig.sound`'s own false default exists to refuse — so the caller
+/// that forgot to update would silently get the unbacked row back. Every
+/// other gate on this function ([canEnd], [privacyUrl], [reportIssue]) is
+/// required for the same reason.
 List<HeaderMenuEntry> headerMenuEntries({
   required bool canEnd,
   required String? privacyUrl,
   required bool reportIssue,
   required bool muted,
+  required bool sound,
 }) {
   // `safeLinkUrl` takes a nullable string and answers both questions at once
   // — "did the merchant publish one" and "may it become a link" — which is
@@ -168,15 +201,16 @@ List<HeaderMenuEntry> headerMenuEntries({
   final String? privacyHref = safeLinkUrl(privacyUrl);
 
   return <HeaderMenuEntry>[
-    HeaderMenuEntry(
-      action: HeaderMenuAction.mute,
-      label: muteLabel(muted: muted),
-      // Struck through once muted, matching the reference's own glyph swap —
-      // a second, redundant reading of a state the label already states.
-      icon: muted
-          ? Icons.notifications_off_outlined
-          : Icons.notifications_outlined,
-    ),
+    if (sound)
+      HeaderMenuEntry(
+        action: HeaderMenuAction.mute,
+        label: muteLabel(muted: muted),
+        // Struck through once muted, matching the reference's own glyph swap
+        // — a second, redundant reading of a state the label already states.
+        icon: muted
+            ? Icons.notifications_off_outlined
+            : Icons.notifications_outlined,
+      ),
     const HeaderMenuEntry(
       action: HeaderMenuAction.startNew,
       label: 'Start new conversation',
@@ -245,6 +279,7 @@ class HeaderMenu extends StatelessWidget {
     required this.privacyUrl,
     required this.reportIssue,
     required this.muted,
+    required this.sound,
     required this.onStartNew,
     required this.onEndConversation,
     required this.onReportIssue,
@@ -256,6 +291,10 @@ class HeaderMenu extends StatelessWidget {
   final String? privacyUrl;
   final bool reportIssue;
   final bool muted;
+
+  /// `RemoteConfig.sound`. Decides whether the mute row exists at all — see
+  /// [headerMenuEntries].
+  final bool sound;
 
   final VoidCallback onStartNew;
   final VoidCallback onEndConversation;
@@ -281,6 +320,7 @@ class HeaderMenu extends StatelessWidget {
       privacyUrl: privacyUrl,
       reportIssue: reportIssue,
       muted: muted,
+      sound: sound,
     );
     final ColorScheme colors = Theme.of(context).colorScheme;
 

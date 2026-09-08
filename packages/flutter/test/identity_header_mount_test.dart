@@ -81,7 +81,15 @@ void main() {
     client = FakeWidgetChatClient();
     cubit = ChatWidgetCubit(
       client: client,
-      initialConfig: testRemoteConfig(title: _title),
+      // `sound: true` is load-bearing for the mute case below, not decoration.
+      // `RemoteConfig.sound` DEFAULTS to false, and the ⋯ menu now drops the
+      // mute row entirely on a tenant that published no chime — `Chime`
+      // refuses on `!sound` before it ever reads `muted`, so the row was the
+      // one unbacked item in a menu whose rule is that there are none. This
+      // fixture is therefore a merchant who did enable it, which is the only
+      // tenant for whom "the mute row is wired to the Cubit" is a question.
+      // The absence half is pinned in `header_menu_mount_test.dart`.
+      initialConfig: testRemoteConfig(title: _title, sound: true),
     );
   });
 

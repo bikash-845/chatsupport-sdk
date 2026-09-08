@@ -158,14 +158,61 @@ class _ChatWidgetState extends State<ChatWidget> {
                 if (!didPop) widget.cubit.back();
               },
               child: Scaffold(
-                // Only the screen a customer DRILLED INTO (today: always the
-                // conversation screen — see ChatWidgetCubit.startNewConversation
-                // / .openConversation, the only two writers of canGoBack)
-                // gets a back bar. Home and Messages are tabs, not
-                // drill-downs, and Home already greets the customer via its
-                // own HeroHeader — a second, generic bar above it would be
-                // a redundant header, not a helpful one.
-                appBar: state.canGoBack
+                // The conversation gets a header; Home and Messages do not.
+                // They are tabs, not drill-downs, and Home already greets the
+                // customer via its own HeroHeader — a second, generic bar
+                // above it would be a redundant header, not a helpful one.
+                //
+                // ── The gate is the SCREEN, not the back history ──────────
+                //
+                // This used to read `state.canGoBack`, and the two are not the
+                // same fact. `canGoBack` is `ChatScreens._stack.isNotEmpty` —
+                // whether the customer DRILLED IN from somewhere — while what
+                // decides whether this bar has anything to say is whether
+                // they are looking at a conversation at all.
+                //
+                // The two only agree for a customer who arrived through Home
+                // or Messages. A host that opens the panel directly ON a
+                // conversation — `ChatWidgetCubit(sessionId: …)`, which
+                // `example/lib/main.dart:472` passes straight through from
+                // its own config, or `initialScreen: ScreenName.conversation`
+                // — starts with an EMPTY stack (`ChatScreens` is CONSTRUCTED
+                // at that screen rather than pushed to it), so `canGoBack`
+                // was false from the first frame and
+                // this header never mounted at all. That took the ⋯ menu with
+                // it: no End conversation (and so no route to the rating card
+                // that follows one), no Start new, no Privacy, no session
+                // switcher and no identity — on a live conversation where
+                // `cubit.canEndConversation` was true the whole time. The row
+                // was backed; there was simply nowhere to press it. Pinned by
+                // `header_menu_mount_test.dart`.
+                //
+                // ── The old gate was wrong in BOTH directions ─────────────
+                //
+                // It is tempting to read this as a pure widening — every
+                // `ChatScreens.go` in the Cubit targets
+                // `ScreenName.conversation`, so surely `canGoBack` implied
+                // "on a conversation". It does not, and the counter-example
+                // is ordinary: `ChatScreens.swap` (what `switchTab` calls)
+                // changes the screen WITHOUT clearing the stack, and its own
+                // test pins that on purpose — `chat_screens_test.dart`'s
+                // "the earlier go() is still there". So a customer who drills
+                // into a conversation and then taps the Messages tab is on
+                // Messages with `canGoBack` still true, and the old gate drew
+                // this whole conversation header — identity, avatar, session
+                // switcher, ⋯ and an unconditional back arrow — on top of
+                // their message list.
+                //
+                // Reading the screen fixes that leak in the same move as the
+                // missing header, because the screen is the fact the header
+                // was always about. Both directions are pinned by
+                // `header_menu_mount_test.dart`.
+                //
+                // `PopScope.canPop` above deliberately still reads
+                // `canGoBack`: back is about the back history, and returning
+                // a tab-switching customer to where they came from is what
+                // `ChatScreens` is designed to do.
+                appBar: state.screen == ScreenName.conversation
                     ? _ConversationAppBar(state: state, cubit: widget.cubit)
                     : null,
                 // The unavailable panel takes over the whole body, in place
@@ -256,7 +303,19 @@ class _ConversationAppBar extends StatelessWidget
             ? 'New conversation'
             : (state.config.title ?? 'Conversation'),
       ),
-      leading: BackButton(onPressed: cubit.back),
+      // The back arrow is the one part of this bar that IS about the back
+      // history, so it alone keeps the `canGoBack` gate the whole header used
+      // to carry. A customer the host opened straight onto a conversation has
+      // nowhere to go back TO; the bottom nav is how they reach Home.
+      //
+      // `automaticallyImplyLeading: false` is required, not tidiness: with a
+      // null `leading` the default deduces one from the enclosing Navigator —
+      // which here is the HOST's, since this package mounts no MaterialApp of
+      // its own (see this library's header). That would paint a back arrow
+      // that pops the host's route out from under the panel.
+      // https://api.flutter.dev/flutter/material/AppBar/automaticallyImplyLeading.html
+      automaticallyImplyLeading: false,
+      leading: state.canGoBack ? BackButton(onPressed: cubit.back) : null,
       actions: <Widget>[
         // Reads the SAME `isHandledByCurrent` gate the title does, which is
         // what stops a face of Ada sitting beside "Acme Support".
@@ -317,6 +376,18 @@ class _ConversationAppBar extends StatelessWidget
           // The same pairing `canEnd` above already makes.
           reportIssue: state.config.reportIssue && cubit.canReportIssue,
           muted: state.muted,
+          // The merchant's chime flag, and the third row gated on its own
+          // backing. `Chime` refuses on `!sound` BEFORE it looks at `muted`
+          // (chime.dart), so on a tenant that published none — and `sound`
+          // defaults to false — mute and unmute both changed nothing a
+          // customer could hear. Offering the row anyway was the one place
+          // this menu broke its own rule, and it is what "mute notification
+          // and unmute notification not working" actually was.
+          //
+          // Read off `state.config`, so a config that arrives late through
+          // `applyRemoteConfig` turns the row on with the same rebuild that
+          // repaints everything else it decides.
+          sound: state.config.sound,
           onStartNew: cubit.startNewConversation,
           onEndConversation: cubit.openEndConversation,
           onReportIssue: cubit.openReportIssue,
