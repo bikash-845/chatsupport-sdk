@@ -914,9 +914,14 @@ class ChatClient {
 
   /// Releases every resource.
   Future<void> dispose() async {
-    _typingController.dispose();
+    // Subscriptions first, THEN the typing timers. The other order leaves a
+    // window in which a frame already in flight arrives after the controller
+    // was torn down and arms a fresh five-second timer on it — re-creating
+    // exactly the pending-timer-outlives-its-owner leak dispose exists to
+    // prevent.
     await _subscription.cancel();
     await _stateSubscription.cancel();
+    _typingController.dispose();
     await _connection.dispose();
     await _messages.close();
     await _sessions.close();

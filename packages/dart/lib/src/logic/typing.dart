@@ -173,7 +173,13 @@ class TypingController {
   final Map<String, Cancellable> _typers = <String, Cancellable>{};
 
   /// Participants currently shown as typing, least recently active first.
-  Iterable<String> get typers => _typers.keys;
+  ///
+  /// A snapshot rather than a live view of the keys, matching the reference
+  /// (`typing.ts:269`). The keys view would throw
+  /// `ConcurrentModificationError` in the caller if an auto-clear fired while
+  /// they were still iterating it — a fault that would surface in whoever is
+  /// reading the list rather than in the timer that actually caused it.
+  List<String> get typers => List<String>.unmodifiable(_typers.keys);
 
   // Outbound throttle state.
   bool _outboundActive = false;
@@ -191,6 +197,7 @@ class TypingController {
   /// whenever the server relays typing onward (see `typingPayload`, which
   /// sends an empty `d` precisely because the server attributes it), so a
   /// relayed frame without one is malformed rather than merely terse.
+  ///
   /// A frame attributed to US is dropped as self-echo (`typing.ts:205`). §7.3
   /// does not say whether the server relays a `typing.start` back to the
   /// participant who sent it. If it does, and this applied it, the customer
