@@ -21,17 +21,21 @@ import { fileURLToPath } from 'node:url';
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const repoRoot = dirname(dirname(packageRoot));
 
-const PORT = Number(process.env['HARNESS_PORT'] ?? 4599);
+const PORT = Number(process.env['HARNESS_PORT'] ?? 3012);
 const DEMO_ORIGIN = process.env['DEMO_ORIGIN'] ?? 'http://localhost:5173';
 
 function env() {
-  const raw = readFileSync(join(repoRoot, 'examples', 'demo', '.env'), 'utf8');
-  const out = {};
-  for (const line of raw.split('\n')) {
-    const match = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-    if (match) out[match[1]] = match[2];
+  try {
+    const raw = readFileSync(join(repoRoot, 'examples', 'demo', '.env'), 'utf8');
+    const out = {};
+    for (const line of raw.split('\n')) {
+      const match = /^([A-Z_]+)=(.*)$/.exec(line.trim());
+      if (match) out[match[1]] = match[2];
+    }
+    return out;
+  } catch {
+    return {};
   }
-  return out;
 }
 
 const server = createServer(async (req, res) => {
@@ -41,7 +45,20 @@ const server = createServer(async (req, res) => {
   // fetch behaves exactly as it would on a real host page.
   if (req.method === 'POST' && pathname === '/api/chat-token') {
     try {
-      const upstream = await fetch(`${DEMO_ORIGIN}/api/token`, { method: 'POST' });
+      const config = env();
+      let upstream;
+      if (config.CHAT_SECRET_KEY && config.CHAT_API_URL) {
+        upstream = await fetch(`${config.CHAT_API_URL.replace(/\/+$/, '')}/chat-services/api/v1/tokens`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            Authorization: `Bearer ${config.CHAT_SECRET_KEY}`,
+          },
+          body: JSON.stringify({ userId: config.DEMO_USER_ID ?? 'demo-user-1' }),
+        });
+      } else {
+        upstream = await fetch(`${DEMO_ORIGIN}/api/token`, { method: 'POST' });
+      }
       const body = await upstream.text();
       res.writeHead(upstream.status, { 'content-type': 'application/json' });
       res.end(body);

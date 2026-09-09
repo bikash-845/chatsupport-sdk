@@ -91,7 +91,8 @@ function defaultOnError(error: unknown): void {
   // one broken selector. Silence is the only worse option — a subscription
   // that has quietly stopped updating is the single hardest widget bug to
   // diagnose, which is why this defaults to loud instead of off.
-  if (typeof console !== 'undefined' && typeof console.error === 'function') {
+  const console = (globalThis as { console?: { error?: (...args: unknown[]) => void } }).console;
+  if (typeof console?.error === 'function') {
     console.error(
       '[@dhaam-ccrm/js] a subscriber threw; every other subscriber is unaffected and this one ' +
         'will recover on the next snapshot. Pass createChatStore(client, { onError }) to handle it yourself.',

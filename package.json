@@ -7,6 +7,9 @@
   "scripts": {
     "build": "pnpm -r build",
     "dev": "pnpm -r --parallel dev",
+    "dev:widget": "pnpm --filter @dhaam-ccrm/widget dev:harness",
+    "dev:widget:watch": "pnpm --filter @dhaam-ccrm/widget dev",
+    "dev:demo": "pnpm --filter @dhaam-ccrm/demo start",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "pnpm -r typecheck",

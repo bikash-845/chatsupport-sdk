@@ -92,6 +92,7 @@ export function createWidgetStore(config: ResolvedConfig): WidgetStore {
     getToken: tokens.getToken,
     apiUrl: config.apiUrl,
     wsUrl: config.wsUrl,
+    ...(config.target === undefined ? {} : { target: config.target }),
 
     // A page-embedded widget is always the customer side. An agent console is
     // a different product with a different token, and guessing wrong here

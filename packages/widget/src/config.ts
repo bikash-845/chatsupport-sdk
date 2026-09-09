@@ -470,6 +470,12 @@ export interface WidgetConfig {
   /** Existing session to join on connect, if the host already knows one. */
   readonly sessionId?: string;
 
+  /**
+   * WHO this conversation is with, when it is not the platform support desk — the
+   * (role, id) pair, e.g. `{ role: 'merchant', id: '42' }`.
+   */
+  readonly target?: { readonly role: string; readonly id: string };
+
   /** Where widget-internal failures go. Defaults to a namespaced `console.warn`. */
   readonly onError?: (error: unknown) => void;
 }
