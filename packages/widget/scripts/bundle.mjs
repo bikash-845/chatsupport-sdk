@@ -24,16 +24,35 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
+import { stripCssCommentsPlugin } from '../build/strip-css-comments.mjs';
+
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const outfile = join(packageRoot, 'dist', 'widget.js');
 
 mkdirSync(join(packageRoot, 'dist'), { recursive: true });
+
+// Filled in by the plugin as it loads the stylesheet, so the report below can
+// say what the strip is worth instead of leaving it as folklore.
+let stripStats = null;
 
 const result = await build({
   entryPoints: [join(packageRoot, 'src', 'embed.ts')],
   outfile,
   bundle: true,
   minify: true,
+  // `minify` does NOT cover the stylesheet. `src/ui/styles.ts` holds the whole
+  // sheet in a template literal, so its `/* … */` blocks are string data;
+  // esbuild leaves them alone because deleting characters from a string would
+  // change what the program means. This plugin knows they are CSS and removes
+  // them before esbuild parses the module. Shared with tsup.config.ts — one
+  // transform, two registrations.
+  plugins: [
+    stripCssCommentsPlugin({
+      onStrip: (stats) => {
+        stripStats = stats;
+      },
+    }),
+  ],
   format: 'iife',
   // ES2020 rather than esnext: `??=`, optional chaining and private fields all
   // exist there, and it is the floor at which the WebSocket/MediaRecorder
@@ -57,11 +76,29 @@ console.log('');
 console.log(`  dist/widget.js   ${fmt(bytes.length)} raw   ${fmt(gzipped.length)} gzip`);
 console.log('');
 
-// A build failure, not a review comment. 90 KiB — roughly 4.9 KB of headroom
-// over the pre-chooser baseline (85,897 B gzip, measured 2026-09-06) —
-// enough to absorb an estimate that is off, not enough to absorb a second
-// feature riding in on top of this one unnoticed.
-const WIDGET_GZIP_BUDGET = 92_160;
+// A build failure, not a review comment. 79 KiB — roughly 4.9 KB of headroom
+// over the current baseline of 75,927 B gzip — enough to absorb an estimate
+// that is off, not enough to absorb a second feature riding in on top of this
+// one unnoticed.
+//
+// THIS NUMBER MOVED DOWN, from 92,160, and it is the first time it has moved
+// in that direction. The reason is that a long-standing cost was RETIRED
+// rather than paid: the stylesheet's CSS comments are string data (see the
+// plugin above), so no minifier ever removed them and every visitor of every
+// host page downloaded 134 blocks of developer prose. Stripping them at build
+// time took this artifact from 320,918 B to 264,724 B raw, and from 95,661 B
+// to 75,927 B gzip — a 19,734 B saving on the number that is actually
+// downloaded. Those are the figures the comparison pass at the bottom of this
+// file prints on every build (`19.3 KB gzip (93.4 KB without the strip)`),
+// measured the way it measures them: one esbuild pass with the plugin removed
+// and nothing else changed. That pass writes no sourcemap, so 35 B of the raw
+// difference is an absent `sourceMappingURL` comment rather than prose.
+//
+// Leaving the ceiling at 92,160 would have left more than 16 KB of silent
+// regression room where the old budget only ever allowed 6,263 B. That is not
+// a budget, it is a formality, and it would have let the whole saving be
+// spent again without anyone being told.
+const WIDGET_GZIP_BUDGET = 80_896;
 if (gzipped.length > WIDGET_GZIP_BUDGET) {
   console.error(
     `  ERROR: dist/widget.js is ${fmt(gzipped.length)} gzip, over the ${fmt(WIDGET_GZIP_BUDGET)} budget.`,
@@ -113,6 +150,47 @@ try {
   console.log(`  of which @dhaam-ccrm/core alone: ${fmt(coreBytes.length)} raw   ${fmt(coreGzip.length)} gzip`);
   console.log(`  the widget's own UI adds:        ${fmt(bytes.length - coreBytes.length)} raw   ${fmt(gzipped.length - coreGzip.length)} gzip`);
   console.log('');
+
+  // What the CSS-comment strip is worth, measured rather than asserted.
+  //
+  // The plugin can report the SOURCE bytes it removed for free, and that
+  // number is the wrong one to publish on its own: comment prose is repetitive
+  // English and gzip eats it, so quoting the raw saving overstates what a
+  // visitor actually saves by roughly 3x — the same trap this file's header
+  // warns about for the bundle as a whole. So this rebuilds once without the
+  // plugin and compares the gzipped results. One extra esbuild pass, measured
+  // at ~110ms against the ~14s tsup spends on .d.ts in the same `pnpm build`,
+  // to keep a number honest that would otherwise be repeated from memory in a
+  // comment and quietly drift away from the artifact.
+  if (stripStats !== null) {
+    await build({
+      entryPoints: [join(packageRoot, 'src', 'embed.ts')],
+      outfile: join(scratch, 'unstripped.js'),
+      bundle: true,
+      minify: true,
+      format: 'iife',
+      target: ['es2020'],
+      platform: 'browser',
+      logLevel: 'silent',
+    });
+    const unstripped = gzipSync(readFileSync(join(scratch, 'unstripped.js')), { level: 9 });
+    console.log(
+      `  css comments stripped from the stylesheet: ${stripStats.removed} blocks, ` +
+        `${fmt(stripStats.bytesRemoved)} of source`,
+    );
+    console.log(
+      `  which is worth: ${fmt(unstripped.length - gzipped.length)} gzip ` +
+        `(${fmt(unstripped.length)} without the strip)`,
+    );
+    // Zero today. A comment with no whitespace on either side is the one shape
+    // the transform declines to touch, because removing it would join two CSS
+    // tokens — see build/strip-css-comments.mjs. Printed so it never becomes
+    // invisible.
+    if (stripStats.kept > 0) {
+      console.log(`  left in place (no whitespace beside them, unsafe to remove): ${stripStats.kept}`);
+    }
+    console.log('');
+  }
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }

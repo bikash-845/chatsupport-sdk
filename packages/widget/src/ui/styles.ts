@@ -859,6 +859,32 @@ button {
 
 /* ── Header ───────────────────────────────────────────────────────────── */
 
+/* The brand band: the header row, the offline banner and the hero as one box
+   (widget.ts's panel children). Structural, and deliberately NOT gated on a
+   design — both designs get the same tree, and only the PAINT below is gated,
+   because two markup shapes for one panel is two shapes to reason about.
+
+   A column of the same three 'flex: none' children the panel column already
+   stacked, so on the classic design this box is exactly as tall as the space
+   its children used to take and nothing moves. 'flex: none' on the wrapper
+   itself for the reason each of them had it: the transcript, and Home, are
+   the only things in the panel column allowed to absorb spare height.
+
+   ── The one thing this box must never grow (stated here, referred to from
+      widget.ts and from the straddle below rather than restated) ──────────
+
+   NO 'z-index', 'transform', 'filter', 'isolation' or 'contain' on this
+   element, ever. Every one of those opens a stacking context, and '.dh-hmenu'
+   — the header menu's dropdown, 'z-index: 3' — lives INSIDE this box.
+   Confined to a band-local context, an OPEN menu would be trapped underneath
+   the very thing it must paint over: Home's CTA card, which the straddle
+   below deliberately overlaps this band's bottom edge with. */
+.dh-brand-band {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+}
+
 .dh-header {
   display: flex;
   align-items: center;
@@ -940,7 +966,13 @@ button {
    whose whole job is to be noticed.
 
    'position: sticky' with 'top: 0' costs nothing where the banner is already
-   in flow, and holds it in place if a future layout ever scrolls this column.
+   in flow, and holds it in place if a future layout ever scrolls the column
+   it sits in. That column is now '.dh-brand-band' (widget.ts), not
+   '.dh-panel' — the band became this banner's sticky containing block when it
+   became its parent — so the intent is scoped accordingly: inert today,
+   because neither box scrolls, and it would come alive only for a layout that
+   made the BAND itself a scroll container. Nothing about the banner's
+   position under the header row, or about its live region, changed with it.
 */
 .dh-offline-banner {
   flex: none;
@@ -975,13 +1007,38 @@ button {
    The background is two layers: a flat colour, and a gradient or image over
    it ('--dh-header-layers', 'none' when neither applies). The foreground is
    computed from the colour's luminance rather than hardcoded white, because
-   a pastel brand with white text is a header nobody can read. */
-:host([data-design="hero"]) .dh-header {
+   a pastel brand with white text is a header nobody can read.
+
+   ── One paint, on the BAND, not two on its parts ────────────────────────
+
+   This used to be declared twice: here, and again on '.dh-hero' below, each
+   with its own 'background-size: cover'. Both are honest readings of "paint
+   this brand colour", and together they are a bug you can see:
+   '--dh-header-layers' is a 'linear-gradient(180deg, …)' top-to-bottom fade,
+   and 'cover' sizes it to the BOX it is painted on, so the fade ran out over
+   the header row's own height and then STARTED OVER at the top of the hero.
+   Two distinct bands with a hard edge between them, on a surface whose whole
+   purpose is to read as one tall header. A background image had the same
+   fault in a louder form — the merchant's photo, cropped twice, at two
+   different scales.
+
+   So it is painted ONCE, on '.dh-brand-band' (widget.ts), the element that
+   contains all three parts; the parts themselves paint nothing and inherit
+   '--dh-header-fg' from it. There is no seam left to restart at.
+
+   'background-size: cover' survives the move, and moving it up here did not
+   retire what 'cover' costs on a box whose height changes — it relocated and
+   widened it. That is a KNOWN, accepted consequence, written out under
+   '.dh-hero' below; read it before reaching for a different 'background-size'
+   here. */
+:host([data-design="hero"]) .dh-brand-band {
   background-color: var(--dh-header-bg);
   background-image: var(--dh-header-layers);
   background-size: cover;
   background-position: center;
   color: var(--dh-header-fg);
+}
+:host([data-design="hero"]) .dh-header {
   /* The paint IS the separation — a hairline on top of it reads as a seam. */
   border-bottom-color: transparent;
 }
@@ -1006,9 +1063,11 @@ button {
 }
 :host([data-design="hero"]) .dh-reconnect:hover { background: rgb(255 255 255 / 0.16); }
 
-/* The hero's content block, painted as a continuation of the header above it
-   rather than as a panel of its own — same background layers, no border
-   between them, so the two read as one tall header.
+/* The hero's content block. It paints NOTHING of its own: the brand colour,
+   the gradient and the foreground all belong to '.dh-brand-band' above, which is
+   the box that spans the header row, the offline banner and this — see that
+   rule for why one paint on the parent is not the same thing as the same
+   paint on each child.
 
    'flex: none' for the same reason .dh-composer has it: the transcript is the
    only element in the panel column allowed to absorb spare height. The hero
@@ -1021,20 +1080,136 @@ button {
    ui/hero-header.ts's module header). A HEIGHT snap, not an animation, is
    what actually gives that space back to '.dh-home'; 'overflow: hidden' is
    what keeps the still-present '.dh-hero-full' content from painting out of
-   a zero-height box while it fades. Nothing else is needed — at height 0
-   the box's own background (colour and gradient layers alike) has no pixels
-   to paint, which also retires the re-stretched-gradient regression the
-   66px bar needed a 'background-image: none' carve-out for. */
+   a zero-height box while it fades. Nothing else is needed — at height 0 this
+   box adds no height to '.dh-brand-band', so the brand paint simply ends under the
+   header row, exactly as it does on a screen that never had a hero.
+
+   ── The re-stretched gradient: RELOCATED and widened, not retired ────────
+
+   The 66px compact bar needed a 'background-image: none' carve-out because a
+   painted box whose height changes re-stretches the gradient painted on it.
+   It is tempting to read the rules above as having killed that regression,
+   and this comment used to say so. It has not. This element has no background
+   left to stretch, but '.dh-brand-band' has one, and 'background-size: cover'
+   sizes it to the BAND's box — so the fault moved up one level, and up there
+   it has MORE ways to fire than the 66px bar ever gave it. Every change to
+   the band's height re-scales the merchant's gradient (or re-crops their
+   background image). There are three:
+
+     1. this hero collapsing to 0 and expanding back — the rules below, on
+        every scroll away from the top of Home and back;
+     2. the offline banner appearing and disappearing — widget.ts stacks it
+        inside this same band, so losing signal re-scales the brand paint;
+     3. leaving Home for Messages or a conversation — 'setPaneVisible' hides
+        this hero outright and the band shrinks to the header row.
+
+   None of that is fixed here, and none of it should be. It is the accepted
+   price of painting the header row and the hero as ONE box (D1): a single
+   band that re-scales when its height changes beats two permanently
+   mismatched bands that never do. Anyone who wants it gone is not tuning
+   'background-size' — they are reopening D1. */
 .dh-hero {
   flex: none;
-  background-color: var(--dh-header-bg);
-  background-image: var(--dh-header-layers);
-  background-size: cover;
-  background-position: center;
-  color: var(--dh-header-fg);
 }
 .dh-hero[hidden], .dh-hero[data-empty="true"] { display: none; }
 .dh-hero[data-collapsed="true"] { height: 0; overflow: hidden; }
+
+/* ── The straddle: Home's first card sits ON the band's bottom edge ───────
+
+   Home's primary call to action ('.dh-home-cta', ui/home-screen.ts) sat
+   entirely below the brand paint, which read as the first row of a list
+   rather than as the one thing the screen is asking for. It now overlaps the
+   band's bottom edge — roughly its top half over the brand colour, its bottom
+   half over the panel's own surface.
+
+   The mechanism is: grow the painted box, then take the same distance back
+   off its outer edge. 'padding-bottom' extends the paint past where the band
+   ends, and the equal, opposite 'margin-bottom' pulls '.dh-home' — the very
+   next sibling, see widget.ts — back up by exactly as much. The two cancel,
+   so the panel's total layout is IDENTICAL to what it was before this rule
+   existed; the only difference is a strip of brand paint behind the top of
+   Home's first card.
+
+   ── Why that distance ────────────────────────────────────────────────────
+
+   It IS a step on the spacing scale — 'calc(var(--dh-space) * 12)', and this
+   sheet already steps in '* 3', '* 4', '* 5' and '* 6' off the same 4px
+   token. Written against the token rather than as a bare '48px' so it cannot
+   silently stop being a step the day '--dh-space' moves.
+
+   Twelve steps because that is '.dh-home's own 16px of top padding (4 steps)
+   plus 32px (8) of the card below it — roughly HALF the card, which is the
+   honest framing; there is no exact card height to be half of. '.dh-home-cta'
+   is 'align-items: center', so its height is whichever is taller of the 36px
+   icon and the text column, plus 12px padding twice and 1px border twice.
+   With no sub-line the icon wins and the card is 62px. With one, the text
+   column wins — a 14px title and a 12px sub-line at the panel's 1.45
+   line-height, 2px apart, so about 40px — and the card is about 66px. Half is
+   therefore 31–33px depending on what the merchant configured, which is why
+   the value is a rounded 32 and the description is "roughly half".
+
+   (That arithmetic is read off the declarations in this file, not measured in
+   a browser. It decides only how much of the card the strip covers, so being
+   a pixel or two out is a cosmetic difference, not a layout one.)
+
+   Named once and used twice, because the two uses must stay EQUAL — the day
+   they drift is the day the panel's whole layout shifts by the difference,
+   which is not a bug anyone would look for in a padding value.
+
+   No 'z-index', and none is needed: '.dh-home' is a LATER sibling than the
+   band, so ordinary in-flow paint order already puts the card (and Home's
+   whole subtree) above the brand paint. The overhanging strip does not steal
+   clicks or scrolls from Home for the same reason — hit-testing follows paint
+   order. Adding a z-index here would be actively wrong, for the reason stated
+   in full on '.dh-brand-band' in the header section.
+
+   The ':has()' is what keeps the overhang honest, and each ':not()' in it
+   mirrors one of the two rules directly above: a collapsed hero (height 0) or
+   one that is hidden/empty (display: none) takes the hero out of the layout,
+   and the overhang has to leave with it. Without them the band would go on
+   overhanging Home by the straddle distance with no hero under it — the card
+   would ride up over the HEADER ROW the moment a scroll collapsed the hero,
+   and on Messages and in a conversation, where there is no hero at all
+   either. ':has()' is live: it
+   is re-evaluated on the same frame 'data-collapsed' flips, which is the
+   frame the height snaps on.
+
+   Both halves living HERE, on the band, is also what keeps ui/hero-header.ts's
+   collapse guard honest. That guard refuses to collapse unless the container
+   will still be scrolled past its slack once the hero's height comes back, and
+   it measures that height as the hero's own 'offsetHeight'. Because the
+   padding and the margin below cancel — and leave together — a collapse is
+   EXPECTED to return exactly the hero's height to '.dh-home' and not a pixel
+   more. Expected, not measured: that follows from the two declarations below
+   being equal and opposite, and nothing in this repo has yet watched it
+   happen (see test/brand-band.test.ts's header for what a browser check would
+   have to measure). Move either declaration onto '.dh-hero' itself and it
+   stops being true even in principle: the guard would then over-count the
+   freed space by the straddle distance and re-open the oscillation loop that
+   guard exists to close.
+
+   ── A known artifact, accepted, deliberately NOT fixed ───────────────────
+
+   Precondition: the collapse guard refuses while 'overflow - freed <= 32px'.
+   Inside that window a visitor can scroll '.dh-home' with the hero still
+   expanded and this strip still in place, which slides Home's own content up
+   underneath the brand paint. Home's later children have transparent
+   backgrounds — '.dh-home-section-title' and '.dh-entry-note' are muted grey
+   text on nothing — so for the length of that scroll they can pass over the
+   merchant's brand colour and lose their contrast against it.
+
+   Accepted as-is. The obvious repair, a background on '.dh-home', would paint
+   over the band and destroy the straddle outright — the straddle works only
+   because Home's surface is transparent where it overlaps. The window is
+   narrow (a Home short enough that the guard refuses, yet long enough to
+   scroll), the effect is transient and affects decoration rather than any
+   control's label. Anything better than accepting it is a redesign of this
+   rule, not a tweak to it. */
+:host([data-design="hero"]) .dh-brand-band:has(.dh-hero:not([hidden]):not([data-empty="true"]):not([data-collapsed="true"])) {
+  --dh-band-straddle: calc(var(--dh-space) * 12);
+  padding-bottom: var(--dh-band-straddle);
+  margin-bottom: calc(var(--dh-band-straddle) * -1);
+}
 
 /* The hero's content block — everything the band draws. Its own opacity
    transition (not the hero's) is the entire animation: no width, height or
@@ -1124,28 +1299,14 @@ button {
   opacity: 0.92;
 }
 
-/* The card still sits in flow rather than overhanging the hero's bottom edge
-   the way the React design does. A negative-margin overhang here would land
-   it on top of .dh-home's own CTA card (ui/home-screen.ts), which mounts
-   directly below the hero once screens are wired — two overlapping "start a
-   conversation" cards is a worse bug than the one pixel of fidelity this
-   trades away. */
-.dh-hero-cta {
-  display: flex;
-  align-items: center;
-  gap: calc(var(--dh-space) * 3);
-  width: 100%;
-  padding: calc(var(--dh-space) * 3);
-  border: 1px solid var(--dh-border);
-  border-radius: var(--dh-radius);
-  background: var(--dh-surface);
-  color: var(--dh-text);
-  text-align: start;
-}
-.dh-hero-cta:hover { background: var(--dh-surface-sunken); }
-.dh-hero-cta-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.dh-hero-cta-title { font-size: 14px; font-weight: 600; }
-.dh-hero-cta-sub { font-size: 12px; color: var(--dh-text-muted); }
+/* No '.dh-hero-cta' rules, and that is the point rather than an omission. The
+   hero drew a "send us a message" card of its own until this sheet's own
+   comment here admitted the problem out loud: it sat directly above
+   '.dh-home-cta' (ui/home-screen.ts), which Home draws unconditionally, so
+   the two were never alternatives — every hero with an enabled CTA showed two
+   cards making the same offer. The straddle above is the fidelity that
+   overhang was reaching for, and Home's card is the one that keeps it.
+   ui/hero-header.ts's module header records the decision. */
 
 .dh-icon-button {
   width: 32px; height: 32px;
@@ -2389,6 +2550,24 @@ button {
   color: var(--dh-text-muted);
 }
 .dh-nav-tab[aria-selected="true"] { color: var(--dh-accent); }
+/* The divider between the two tabs. Without it, two equal-width 'flex: 1'
+   columns under one 'border-top' read as a single wide control rather than as
+   a choice of two — the accented colour on the selected one is the only thing
+   saying otherwise, and colour alone is not a boundary.
+
+   'border-inline-start' rather than 'border-left': this sheet is RTL-aware
+   (see '.dh-hero-avatar's 'margin-inline-start' and '.dh-nav-badge's
+   'inset-inline-end'), and in an RTL locale Messages is the tab on the left,
+   so the line belongs on its other physical side.
+
+   On the ADJACENT-SIBLING pair, so only the inner edge is drawn — the same
+   declaration on '.dh-nav-tab' itself would put a second line down the
+   panel's own left wall. And ungated by 'data-design', unlike the brand band
+   above: the tabs run together on every design, so the fix belongs to every
+   design. It is decoration only — 'ui/nav.ts' draws no element and no text
+   node between the tabs, because a border adds nothing to the accessibility
+   tree and a spacer element would. */
+.dh-nav-tab + .dh-nav-tab { border-inline-start: 1px solid var(--dh-border); }
 .dh-nav-icon { position: relative; display: inline-flex; }
 .dh-nav-label { font-size: 11px; font-weight: 500; }
 /* Same red-pill treatment as .dh-session-unread and .dh-messages-unread --

@@ -16,13 +16,42 @@
 // is a different thing:  `.dh-hero[data-empty="true"]` — "this hero has
 // nothing to draw" — is unrelated to which SCREEN is showing.
 //
-// The CTA calls `onCallToAction`, which `widget.ts` wires to the same
-// "open the new-conversation surface" flow the Home screen's own CTA card
-// uses (`ui/home-screen.ts`) and the Messages screen's "New conversation"
-// button uses — three affordances, one destination. A merchant who enables
-// both this CTA (`header.ctaEnabled`) and relies on Home's own card gets two
-// visually different buttons that do the same thing; that overlap is a
-// console/design question, not something this component resolves on its own.
+// ── The hero has no call to action, and this is decided ───────────────────
+//
+// It used to build a `.dh-hero-cta` from `header.ctaEnabled`/`ctaTitle`/
+// `ctaSubtitle`, calling back into the same "open the new-conversation
+// surface" flow that Home's own card and the Messages screen's "New
+// conversation" button open. This file used to describe that overlap as an
+// open console/design question. It is not open any more: the answer is that
+// the hero renders no CTA at all.
+//
+// What settled it is that the overlap is not conditional. The hero shows only
+// while the Home screen is showing — `widget.ts`'s `syncScreens` gates it on
+// `onHome && design === 'hero'`, a strict subset of the times Home is up — and
+// `ui/home-screen.ts` builds `.dh-home-cta` on Home unconditionally, so an
+// enabled hero CTA is never an alternative to Home's card, it is always a
+// SECOND card, directly above it, making the identical offer and leading to
+// the identical destination. Two of them is one more than the screen is
+// asking for, and the hero's was the weaker of the two: it is inside this
+// block's `aria-hidden`, so it carried `tabindex="-1"`, and `ui/focus.ts`'s
+// `isHidden` walks up to that same `aria-hidden` and kept it out of the focus
+// trap as well. No keyboard user and no screen reader could reach it.
+//
+// It was still PAINTED and still clickable, so a sighted pointer user does
+// lose an affordance here — that is the honest cost and it is not nothing.
+// What no user loses is a DESTINATION: Home's own card sits one gap below,
+// makes the identical offer and opens the identical flow.
+//
+// And the removal is a REPAIR, not only a tidy-up. A control the widget drew,
+// styled as a button and invited a click on, that keyboard and screen-reader
+// users could not operate at all, is a defect on its own terms — it had been
+// shipping as one. Deleting it closes that, and leaves one affordance on Home
+// which every user can actually reach.
+//
+// The three console fields still parse and still round-trip (`src/config.ts`,
+// `src/remote-config.ts` — they are the published wire schema). They simply
+// no longer reach a rendered button; see `heroContentFrom` at the bottom of
+// this file for what a merchant who set them sees instead.
 //
 // ── The collapse: expanded or gone, nothing in between ─────────────────────
 //
@@ -98,9 +127,6 @@ export interface HeroContent {
   readonly avatars: readonly string[];
   readonly greeting: string;
   readonly subGreeting: string;
-  readonly ctaEnabled: boolean;
-  readonly ctaTitle: string;
-  readonly ctaSubtitle: string;
 }
 
 export interface HeroHeaderView {
@@ -142,14 +168,6 @@ const MAX_AVATARS = 3;
  */
 const COLLAPSE_SLACK_PX = 32;
 
-export interface HeroHeaderCallbacks {
-  /**
-   * The CTA was pressed. See the module header — there is no conversation to
-   * start, so the caller focuses the composer.
-   */
-  onCallToAction(): void;
-}
-
 /**
  * The face row.
  *
@@ -179,16 +197,23 @@ function buildAvatarRow(faces: readonly string[], showPresence: boolean): HTMLEl
   });
 }
 
-export function createHeroHeader(callbacks: HeroHeaderCallbacks): HeroHeaderView {
+// Takes no callbacks. It had exactly one — the CTA's — and the CTA is gone
+// (see the module header); everything left in this block is decoration that
+// nothing can press.
+export function createHeroHeader(): HeroHeaderView {
   const full = el('div', { attrs: { class: 'dh-hero-full' } });
 
   // `aria-hidden` on the whole block, and this is deliberate rather than
   // careless. Every string in it is decoration that the panel already conveys:
-  // the greeting repeats what the composer's placeholder asks for, the logo
-  // and faces are branding, and the CTA's only action is to focus a composer
-  // a keyboard user reaches by pressing Tab once. Announcing all of it before
-  // the conversation would put four lines of marketing in front of a screen
-  // reader user every time they open the chat.
+  // the greeting repeats what the composer's placeholder asks for, and the
+  // logo and faces are branding. Announcing all of it before the conversation
+  // would put several lines of marketing in front of a screen reader user
+  // every time they open the chat. Nothing in here is interactive any more
+  // either — the CTA was the only control this block ever had, and the reason
+  // it needed an explicit `tabindex="-1"` (a focusable control inside an
+  // aria-hidden subtree is the one combination that genuinely breaks
+  // assistive tech). With it gone, the promise this attribute makes is
+  // structurally true rather than maintained by hand.
   const node = el('div', {
     attrs: { class: 'dh-hero', hidden: true, 'aria-hidden': 'true' },
     children: [full],
@@ -219,35 +244,9 @@ export function createHeroHeader(callbacks: HeroHeaderCallbacks): HeroHeaderView
       fullChildren.push(el('p', { attrs: { class: 'dh-hero-sub' }, text: content.subGreeting }));
     }
 
-    if (content.ctaEnabled && content.ctaTitle !== '') {
-      fullChildren.push(
-        el('button', {
-          attrs: {
-            class: 'dh-hero-cta',
-            type: 'button',
-            // Focusable despite the block's `aria-hidden`? No — and that is
-            // why it is removed from the tab order explicitly. A focusable
-            // control inside an aria-hidden subtree is the one combination
-            // that genuinely breaks assistive tech, because focus lands
-            // somewhere the screen reader insists does not exist. The composer
-            // it would have focused is the very next tab stop anyway.
-            tabindex: '-1',
-          },
-          children: [
-            el('span', {
-              attrs: { class: 'dh-hero-cta-text' },
-              children: [
-                el('span', { attrs: { class: 'dh-hero-cta-title' }, text: content.ctaTitle }),
-                ...(content.ctaSubtitle === ''
-                  ? []
-                  : [el('span', { attrs: { class: 'dh-hero-cta-sub' }, text: content.ctaSubtitle })]),
-              ],
-            }),
-          ],
-          on: { click: () => callbacks.onCallToAction() },
-        }),
-      );
-    }
+    // No CTA. `header.ctaEnabled`/`ctaTitle`/`ctaSubtitle` are not read here
+    // at all — see the module header for why Home's card is the one that
+    // survived, and `heroContentFrom` for what those fields still do.
 
     full.replaceChildren(...fullChildren);
 
@@ -355,6 +354,22 @@ export function createHeroHeader(callbacks: HeroHeaderCallbacks): HeroHeaderView
  * header's own wins and the top-level one stands behind it — which is the
  * difference between `showLogo: true` rendering something and rendering
  * nothing at all.
+ *
+ * ── Where `ctaEnabled` / `ctaTitle` / `ctaSubtitle` stop ──────────────────
+ *
+ * Here. They are on `HeaderAppearance` and they stay there — `src/config.ts`
+ * and `src/remote-config.ts` are the published wire schema, a console that
+ * writes them must keep round-tripping, and dropping a field a merchant has
+ * saved is a different and much larger decision than not drawing a button.
+ * They are simply never copied onto `HeroContent`, so nothing downstream can
+ * read them.
+ *
+ * What a merchant who set them sees: the hero draws their logo, faces,
+ * greeting and sub-line, and no button — and Home's own card, one gap below
+ * where theirs would have been, carries the "send us a message" offer with
+ * ITS OWN copy (`ui/home-screen.ts`'s `ctaCopy`), not the `ctaTitle` they
+ * typed. So a merchant who wrote a custom hero CTA title loses that wording;
+ * the affordance itself is not lost, and their title never appears twice.
  */
 export function heroContentFrom(
   header: HeaderAppearance,
@@ -368,8 +383,5 @@ export function heroContentFrom(
     avatars: header.avatars,
     greeting: header.greeting,
     subGreeting: header.subGreeting,
-    ctaEnabled: header.ctaEnabled,
-    ctaTitle: header.ctaTitle,
-    ctaSubtitle: header.ctaSubtitle,
   };
 }

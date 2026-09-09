@@ -15,8 +15,44 @@
 import { el, icon, ICONS } from './dom.js';
 import { relativeTimeLabel } from './session-picker.js';
 import { statusPill } from './session-status.js';
+import type { ChatStatus } from '@dhaam-ccrm/core';
 import type { ChatSessionSummary } from '@dhaam-ccrm/js';
 import type { ResolvedEntry } from '../remote-config.js';
+
+/**
+ * Which statuses Home's "Recent conversation" section shows at all.
+ *
+ * `OPEN` and nothing else, decided by the product owner in answer to a direct
+ * question: this section is a shortcut back into the conversation still
+ * going, not a second conversation list. A row that is `RESOLVED` or `CLOSED`
+ * is over; `WAITING_FOR_AGENT`, `ASSIGNED` and `ON_HOLD` are live but are
+ * waiting on the merchant rather than on the customer, and putting either
+ * kind at the top of Home invites a tap that leads somewhere the customer has
+ * nothing left to do. A narrower rule than "hide the finished ones" was
+ * offered alongside the broader one and this is the one that was chosen — so
+ * widening it is a product decision, not a tidy-up.
+ *
+ * Nothing becomes unreachable: every conversation in every status is still on
+ * the Messages screen, and the bottom tab bar that opens it is on screen
+ * whenever Home is. Not behind this section's own "See all" — that button is
+ * a CHILD of the section (`recentSection` below), so hiding the section takes
+ * "See all" with it. The Messages tab is the whole surviving route, which is
+ * why it has to be one that is always there.
+ *
+ * A `Record<ChatStatus, boolean>` rather than `status === 'OPEN'`, for exactly
+ * the reason `ui/session-status.ts` gives for its own table: a seventh wire
+ * status has to be a COMPILE ERROR here. `!== 'OPEN'` would silently keep a
+ * new status hidden, which is the safe half; `=== 'OPEN'` written the other
+ * way round would silently show it. Neither would make anyone decide.
+ */
+const SHOWN_IN_RECENT: Record<ChatStatus, boolean> = {
+  OPEN: true,
+  WAITING_FOR_AGENT: false,
+  ASSIGNED: false,
+  ON_HOLD: false,
+  RESOLVED: false,
+  CLOSED: false,
+};
 
 export interface HomeScreenCallbacks {
   /** Start a fresh conversation. */
@@ -34,10 +70,20 @@ export interface HomeScreenCallbacks {
 export interface HomeScreenView {
   readonly node: HTMLElement;
   /**
-   * @param recent the newest conversation, or `null` when there is none —
-   *   which is the case for every first-time visitor, and the reason the
-   *   whole "Recent conversation" section is conditional rather than an
-   *   empty-state box.
+   * @param recent the newest conversation OVERALL, or `null` when there is
+   *   none — which is the case for every first-time visitor, and part of why
+   *   the whole "Recent conversation" section is conditional rather than an
+   *   empty-state box. The other part is its STATUS: the section shows only
+   *   for an `OPEN` one (see {@link SHOWN_IN_RECENT}), so passing a resolved
+   *   or waiting conversation here renders the row and hides the section.
+   *
+   *   "Overall" is load-bearing and is the caller's choice, not this
+   *   screen's: `widget.ts`'s `mostRecentSession` picks the newest session
+   *   whatever its status, and it is deliberately NOT "the newest open one".
+   *   A visitor whose newest conversation has just been closed therefore sees
+   *   no Recent section even when an older open one exists. That is the
+   *   approved behaviour — the older one is one tap away on Messages — so
+   *   this is not a bug to fix by teaching the caller to search.
    * @param entry the resolved support entry — which of the six PRD rows this
    *   render is for. Drives the CTA's title/sub-line, the alt button beside
    *   it, and the mid-visit chat→ticket announcement.
@@ -238,7 +284,12 @@ export function createHomeScreen(callbacks: HomeScreenCallbacks): HomeScreenView
       }
       previousPrimary = entry.source === 'published' ? entry.primary : 'chat';
 
-      recentSection.hidden = recent === null;
+      // Hidden unless there IS one and it is still OPEN — see
+      // {@link SHOWN_IN_RECENT}. The row's own content is still filled in
+      // below for every status, so this is a visibility decision and not an
+      // emptying one: the pill's words stay correct, and a future rule that
+      // shows more statuses needs no second change here.
+      recentSection.hidden = recent === null || !SHOWN_IN_RECENT[recent.status];
       if (recent === null) return;
 
       // NOT a subject line. The reference product shows one ("Delivery

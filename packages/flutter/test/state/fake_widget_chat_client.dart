@@ -282,13 +282,21 @@ ChatMessage testMessage({
 }
 
 /// A minimal SessionSnapshot for tests.
-SessionSnapshot testSession(
-    {String id = 's1', ChatStatus status = ChatStatus.open}) {
+///
+/// [handledBy] defaults to absent, which is what a snapshot carries when
+/// nobody has picked the session up yet — see `HandledBy`'s own header on why
+/// that absence is presentation-only.
+SessionSnapshot testSession({
+  String id = 's1',
+  ChatStatus status = ChatStatus.open,
+  HandledBy? handledBy,
+}) {
   return SessionSnapshot(
     sessionId: id,
     status: status,
     mode: ChatMode.human,
     participants: const <ParticipantSnapshot>[],
     createdAt: DateTime.utc(2026, 1, 1),
+    handledBy: handledBy,
   );
 }

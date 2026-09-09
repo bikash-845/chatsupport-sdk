@@ -634,7 +634,7 @@ describe('appearance, and the host’s right to overrule it', () => {
       },
     });
 
-    it('renders the merchant’s greeting, faces and call to action', async () => {
+    it('renders the merchant’s greeting and faces', async () => {
       stubFetch(hero);
       mount(config());
       await settle();
@@ -645,11 +645,25 @@ describe('appearance, and the host’s right to overrule it', () => {
       // The dot rides the LAST face only — it says "someone is here", not
       // "this particular person is".
       expect(shadow().querySelectorAll('.dh-hero-presence')).toHaveLength(1);
-      expect(find('.dh-hero-cta-title')?.textContent).toBe('Send us a message');
+    });
+
+    // D3, end to end: the published `header.ctaEnabled: true` in the fixture
+    // above still PARSES (it is the wire schema — see the parse assertions
+    // elsewhere in this file), and still reaches no button. Home's own card
+    // is the single "send us a message" affordance on the screen, because the
+    // hero only ever shows on Home and Home always draws that card.
+    it('draws no hero call to action, even from a publish that enables one', async () => {
+      stubFetch(hero);
+      mount(config());
+      await settle();
+
+      expect(find('.dh-hero-cta')).toBeNull();
+      expect(find('.dh-hero-cta-title')).toBeNull();
+      expect(shadow().querySelectorAll('.dh-home-cta')).toHaveLength(1);
     });
 
     // The whole block is decoration the panel already conveys, and announcing
-    // four lines of marketing before the conversation is hostile.
+    // several lines of marketing before the conversation is hostile.
     it('is hidden from the a11y tree, with nothing focusable left inside it', async () => {
       stubFetch(hero);
       mount(config());
@@ -657,8 +671,9 @@ describe('appearance, and the host’s right to overrule it', () => {
 
       expect(find('.dh-hero')?.getAttribute('aria-hidden')).toBe('true');
       // A focusable control inside an aria-hidden subtree is the one
-      // combination that genuinely breaks assistive tech.
-      expect(find('.dh-hero-cta')?.getAttribute('tabindex')).toBe('-1');
+      // combination that genuinely breaks assistive tech. There is no longer
+      // any control in here to need excusing — the CTA was the only one.
+      expect(find('.dh-hero')?.querySelector('button, a, input, [tabindex]')).toBeNull();
     });
 
     it('shows while the transcript is empty and never on the classic design', async () => {

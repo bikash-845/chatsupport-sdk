@@ -131,6 +131,43 @@ The example demonstrates both modes: supply the token, then use the **Visitor**
 switch on the host screen. The user id stays the same across it and only the
 profile moves, which is the whole point.
 
+### "My signed-in customer is still being asked for their name"
+
+Reported twice, by two different integrators, both of whom had authenticated
+the customer properly. Both were right about their end and the widget was
+right about its end: `identity` **defaults to `ChatIdentity.guest`**, so a
+host that passes a perfectly good customer token and nothing else has, as far
+as this package can tell, described an anonymous visitor. It cannot tell
+otherwise — the token is opaque to it by design, and the `userId` it can see
+belongs to guests too.
+
+The fix is one parameter:
+
+```dart
+ChatWidgetCubit(
+  client: client,
+  // Presence of the PROFILE is the fact. An empty
+  // `ChatParticipantProfile()` is enough when that is all you know.
+  identity: const ChatIdentity(
+    userId: 'cus_1042',
+    profile: ChatParticipantProfile(
+      name: 'Jordan Rivera',
+      email: 'jordan@example.com',
+    ),
+  ),
+);
+```
+
+Since it could not be detected, it is at least now **said out loud**: in debug
+builds, the first time the pre-chat form is about to ask a visitor this widget
+considers a guest, the package prints a short explanation of the above to the
+console (`_warnIfAskingAGuestForDetails`, in
+`lib/src/state/chat_widget_cubit.dart`). It fires once per
+widget, never in release, carries nothing about the visitor or the credential,
+and is silent for a host that passed a profile. A genuinely guest-only
+deployment can ignore it — the line names the fix rather than a fault, and it
+does not appear at all until the form actually comes up.
+
 
 ## Running the example
 
@@ -325,14 +362,76 @@ module rather than a gap. `SessionPickerScreen` looks like superseded code:
 Home and Messages read `state.sessionSummaries` directly, expressing the same
 `sessions.length > 0` gate as rows rather than as a surface.
 
-`state.sessionSummaries` itself is no longer always empty. It is populated by
-whoever calls `ChatWidgetCubit.updateSessionSummaries`, which this package
-cannot do for itself — `WidgetChatClient` is the WebSocket slice and
-`dhaam_chat` cannot list sessions at all — so the page is the host's to fetch.
-`packages/flutter/example/lib/session_list.dart` is a worked example of that,
-over `dhaam_chat_rest`'s `listSessions` and driven by the package's own
-`SessionListRefresher`. A host that renders nothing here has a Messages screen
-with nothing to draw, which is a wiring gap and not a parity one.
+`state.sessionSummaries` itself is no longer always empty, and there are now
+**two** ways to fill it. The page still comes from outside either way —
+`WidgetChatClient` is the WebSocket slice and `dhaam_chat` cannot list
+sessions at all — but who remembers to ask for it has changed.
+
+**Hand the fetch over (recommended).** `ChatWidgetCubit` takes an optional
+`sessionSource`, a `SessionListFetch` — one call, one page — and owns the
+triggers itself:
+
+```dart
+ChatWidgetCubit(
+  client: client,
+  // `RestChatSessionSummary` and `ChatSessionSummary` share dhaam_chat's own
+  // ChatStatus/ChatMode/HandledBy, so there is no vocabulary to translate --
+  // only a field copy. `packages/flutter/example/lib/session_list.dart`'s
+  // `toChatSessionSummary` is one; it lives in the example rather than this
+  // package because a host proxying chat through its own backend maps from
+  // something that is not `RestChatSessionSummary` at all.
+  sessionSource: () async =>
+      (await rest.listSessions(limit: 10)).map((RestChatSessionSummary r) =>
+          ChatSessionSummary(
+            id: r.id,
+            status: r.status,
+            mode: r.mode,
+            createdAt: r.createdAt,
+            closedAt: r.closedAt,
+            lastMessageAt: r.lastMessageAt,
+            lastMessagePreview: r.lastMessagePreview,
+            unreadCount: r.unreadCount,
+            handledBy: r.handledBy,
+            subject: r.subject,
+            topic: r.topic,
+          )).toList(growable: false),
+);
+```
+
+That is the whole wiring. The page is fetched when the widget opens (inside
+`connect()`, which `ChatWidget.initState` already calls) and refetched
+whenever a session snapshot changes something a list **row** is drawn from —
+its id, its status, or the name in its `handledBy`. Routine
+live-conversation traffic does not refetch, so this is not a request per
+event. A fetch that **fails** is reported to `FlutterError`, leaves the page
+already on screen alone rather than emptying it, and does not consume its
+trigger: the next snapshot asks again. **The one gap that leaves:** if no
+further snapshot ever arrives — a signed-in customer whose conversations are
+all closed may get none after the open-time fetch — nothing retries, and the
+list stays as it was. Closing that would need a timer this Cubit would then
+have to own and cancel; `updateSessionSummaries` remains available as a
+host-driven pull-to-refresh in the meantime. An **empty** page is ordinary success,
+never an error — `listSessions` answers a guest with `[]`, never a 403, and
+turning that into a failure would make "not identified" indistinguishable
+from "the lookup failed".
+
+It is a function rather than a REST client on purpose: a host that proxies
+chat through its own backend fills this list from something that is not
+`dhaam_chat_rest`, and a closure is also what keeps these paths testable
+without a network. It is the same shape as `AttachmentUploader`,
+`TranscriptEmailer` and `IssueReporter`.
+
+**Or push your own page.** `ChatWidgetCubit.updateSessionSummaries` is
+unchanged and still public, for a host that already fetches this list and
+wants to decide when. `packages/flutter/example/lib/session_list.dart` is a
+worked example of that route — it predates `sessionSource` and drives the
+package's own `SessionListRefresher` directly, which is exactly what
+`sessionSource` now does for you.
+
+A host that wires **neither** has a Messages screen with nothing to draw.
+That was two integrators' bug report, and `sessionSource` exists because a
+silently empty list is indistinguishable from a customer who has never
+started a conversation.
 
 **The inline report-issue entry point is not ported.** `widget.ts` opens the
 report form from two places — the header menu (`:858`, ported) and an inline

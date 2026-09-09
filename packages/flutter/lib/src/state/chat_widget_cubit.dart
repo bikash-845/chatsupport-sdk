@@ -42,6 +42,11 @@ import '../ui/csat/session_actions.dart';
 import '../ui/header/transcript_email.dart';
 import '../forms/forms.dart' show FormErrorReporter;
 import '../ui/pre_chat/pre_chat.dart';
+// For `SessionListFetch` and `SessionListRefresher` — the collaborator that
+// already owns the two cadence rules a session list needs (serialise
+// concurrent fetches; re-issue rather than drop an ask that arrives
+// mid-flight). See [sessionSource].
+import '../ui/session_picker/session_list_refresher.dart';
 import 'chat_widget_state.dart';
 import 'widget_chat_client.dart';
 
@@ -65,6 +70,31 @@ import 'widget_chat_client.dart';
 /// The same number as `DEFAULT_RECONNECT_INTERVAL_MS` in `@dhaam-ccrm/browser`.
 const Duration kReconnectInterval = Duration(seconds: 3);
 
+/// What a host reads in its debug console when the pre-chat gate is about to
+/// ask a visitor this widget considers a guest for their details.
+///
+/// A constant, and deliberately nothing but a constant: see
+/// [ChatWidgetCubit._warnIfAskingAGuestForDetails] for when it is printed,
+/// why not sooner, and why nothing about the visitor is interpolated into it.
+const String _kGuestPreChatWarning = '''
+dhaam_chat_flutter: about to show the pre-chat form, because this visitor is
+being treated as a GUEST. If you believe this customer is signed in, the widget
+disagrees, and here is why:
+
+  * `identity.profile` is what makes a visitor identified, and it is the ONLY
+    thing that does. Pass one — `ChatIdentity(userId: ..., profile:
+    ChatParticipantProfile(name: ..., email: ...))` — and the form stops
+    asking. An empty `ChatParticipantProfile()` is enough if that is all you
+    know; presence is the fact, not the fields inside it.
+  * `identity.userId` alone does NOT identify anybody. Every anonymous visitor
+    is issued one too, so a widget gating on it would ask nobody.
+  * A customer token does not identify anybody either. Guest sessions need a
+    token as well, and this package cannot read what is inside one, so holding
+    a valid token tells the widget nothing about who is holding it.
+
+If this visitor really is a guest, nothing is wrong and you can ignore this.
+Printed once per widget, in debug builds only.''';
+
 class ChatWidgetCubit extends Cubit<ChatWidgetState> {
   /// [sessionId] names a conversation the HOST wants this widget to open on.
   ///
@@ -77,6 +107,78 @@ class ChatWidgetCubit extends Cubit<ChatWidgetState> {
   ///
   /// [initialScreen] still overrides the screen half for a host that wants
   /// to land on Messages, and is what the existing callers pass.
+  ///
+  /// [identity] is what the host knows about the visitor, and its DEFAULT is
+  /// [ChatIdentity.guest]. A host that omits it has said "anonymous visitor",
+  /// however signed in that customer is elsewhere: the token is opaque to this
+  /// package and `userId` belongs to guests too, so [ChatIdentity.profile] is
+  /// the only thing that can say otherwise. Left as a default rather than made
+  /// required — that would break every existing caller for the sake of the
+  /// ones getting it wrong — so the wrong answer is instead said out loud in
+  /// debug builds by [_warnIfAskingAGuestForDetails], at the moment it starts
+  /// costing the customer something.
+  ///
+  /// [sessionSource] is the OPTIONAL seam that fills the Messages and Home
+  /// session lists.
+  ///
+  /// ── The reported bug this parameter answers ────────────────────────────
+  ///
+  /// "The list of past conversations is empty", twice, from two different
+  /// integrators, both signed in and both correctly configured. It was empty
+  /// because nothing had called [updateSessionSummaries] — the only way a
+  /// list could ever appear before this existed. `dhaam_chat` has no HTTP
+  /// layer and cannot list sessions at all, so the Cubit genuinely could not
+  /// do it alone; but nothing said so, and an unwired host got a silently
+  /// empty list that is indistinguishable from "this customer has no
+  /// conversations".
+  ///
+  /// So a host now hands over the FETCH and this Cubit owns the triggers:
+  ///
+  /// ```dart
+  /// ChatWidgetCubit(
+  ///   client: client,
+  ///   // `toChatSessionSummary` is a field copy the HOST owns -- see
+  ///   // `example/lib/session_list.dart`. It is not exported from this
+  ///   // package: a host proxying chat through its own backend maps from
+  ///   // something that is not `RestChatSessionSummary` at all.
+  ///   sessionSource: () async => (await rest.listSessions(limit: 10))
+  ///       .map(toChatSessionSummary)
+  ///       .toList(growable: false),
+  /// );
+  /// ```
+  ///
+  /// ── Why a function and not a REST client ───────────────────────────────
+  ///
+  /// Not for dependency reasons — this package already declares
+  /// `dhaam_chat_rest` as a direct dependency (see `pubspec.yaml`, decision
+  /// D22), so taking a client here would add nothing to anyone's graph.
+  ///
+  /// It is that a host proxying chat through its own backend fills this list
+  /// from something that is NOT `dhaam_chat_rest`, and a client-typed
+  /// parameter has no shape for that host to satisfy. It is also the pattern
+  /// the other three host seams on this class already follow —
+  /// `AttachmentUploader`, `TranscriptEmailer`, `IssueReporter` are all
+  /// function-typed for the same reason, and are what keeps every test here
+  /// runnable with a closure and no network.
+  /// A `Future<List<ChatSessionSummary>> Function()` is the whole contract:
+  /// one call, one page.
+  ///
+  /// ── What it does and does not change ───────────────────────────────────
+  ///
+  /// Absent, nothing about this class differs from before it existed:
+  /// [updateSessionSummaries] stays public and stays the way a host that
+  /// already pushes its own list keeps working. Supplied, the page is
+  /// refetched when the widget opens ([connect]) and whenever a session
+  /// snapshot changes something a list ROW is built from — its ID, its
+  /// status, or the name in its `handledBy`, and nothing else. Routine
+  /// live-conversation traffic does not refetch; see [_onSession].
+  ///
+  /// An EMPTY page is ordinary success and is the guest signal — `listSessions`
+  /// answers a guest with `[]`, never a 403 — so it is stored as an empty
+  /// list and never turned into an error. A FAILED fetch is reported to
+  /// `FlutterError`, leaves whatever page is already on screen alone, and
+  /// does NOT consume the trigger that asked for it: the next snapshot tries
+  /// again. See [_listedSessionKey].
   ChatWidgetCubit({
     required WidgetChatClient client,
     RemoteConfig initialConfig = defaultRemoteConfig,
@@ -86,6 +188,7 @@ class ChatWidgetCubit extends Cubit<ChatWidgetState> {
     Scheduler scheduler = const SystemScheduler(),
     Duration reconnectInterval = kReconnectInterval,
     ChatSessionActions? sessionActions,
+    SessionListFetch? sessionSource,
     ConsentGate? consent,
     IssueReporter? issueReporter,
     AttachmentUploader? attachmentUploader,
@@ -151,6 +254,30 @@ class ChatWidgetCubit extends Cubit<ChatWidgetState> {
     // construction awaited I/O would be untestable by construction (the same
     // reason [connect] is not called from here either).
     unawaited(_restoreConsent());
+    // The seam whose ABSENCE is the reported "conversation list not
+    // appearing". Built here rather than in the initializer list because its
+    // writer is this Cubit's own [updateSessionSummaries] — see
+    // [sessionSource].
+    final SessionListFetch? source = sessionSource;
+    if (source != null) {
+      _sessionList = SessionListRefresher(
+        fetch: source,
+        // The one hop that puts a page on screen. Everything else in this
+        // wiring is scheduling; [_onSessionPage] is the wire, and cutting the
+        // `updateSessionSummaries` call inside it is the mutation
+        // `session_source_test.dart` exists to catch.
+        onSessions: _onSessionPage,
+        // The host's channel, never the customer's screen — where every other
+        // error in this class goes. Nothing here empties the list: the
+        // refresher does not call `onSessions` for a failed fetch, because a
+        // stale list still describes conversations that exist and an emptied
+        // one claims they do not.
+        onError: (Object error, StackTrace stackTrace) =>
+            FlutterError.reportError(
+          FlutterErrorDetails(exception: error, stack: stackTrace),
+        ),
+      );
+    }
   }
 
   final WidgetChatClient _client;
@@ -161,6 +288,64 @@ class ChatWidgetCubit extends Cubit<ChatWidgetState> {
   /// footer and no way to end a conversation from here. Off, not broken; a
   /// card whose submit silently discarded the answer would be worse.
   final ChatSessionActions? _sessionActions;
+
+  /// The host's [SessionListFetch], wrapped in the refresher that serialises
+  /// it, or null when the host wired none up.
+  ///
+  /// Null means exactly what it meant before this field existed: the list is
+  /// the host's to push in through [updateSessionSummaries], and this Cubit
+  /// fetches nothing. Every existing host is that case and is unaffected.
+  ///
+  /// Not `final`: the refresher's writer is [_onSessionPage], which is
+  /// `this`, so it cannot be built in the initializer list.
+  SessionListRefresher? _sessionList;
+
+  /// Everything about a snapshot that a summary ROW is drawn from, for the
+  /// snapshot whose page has actually LANDED — or null before any has.
+  ///
+  /// ── What is in the key, and why nothing else is ────────────────────────
+  ///
+  /// Three fields, and they are three because three is what the row widgets
+  /// read: `id` (a conversation this widget has not listed yet), `status`
+  /// (the "still reading With an agent two minutes after it ended" report),
+  /// and the display name inside `handledBy` — which `session_row_list.dart`
+  /// draws as "with Priya", `session_row_description.dart` puts in the
+  /// accessible name, `home_screen.dart` uses as the Home row's HEADING and
+  /// `messages_screen.dart` indexes for search. An agent-to-agent handover
+  /// moves only that field, so a key without it leaves the previous agent's
+  /// name as a row title and reads it out to a screen reader.
+  ///
+  /// `handledBy`'s `id` and `kind` are deliberately absent, as is `mode`: no
+  /// row is built from any of them, so a change to one redraws identically
+  /// and a page fetched for it would be a request that changes nothing. The
+  /// rule is what a row RENDERS, not what a snapshot carries — add a field
+  /// here when, and only when, a row starts drawing it.
+  ///
+  /// A record rather than an interpolated string: `handledBy.displayName` is
+  /// free text a human typed, so a separator-joined key can be forged by a
+  /// name with a space in it, and the record compares the parts as parts.
+  ///
+  /// ── Why it records the LANDING and not the ask ─────────────────────────
+  ///
+  /// Written by [_onSessionPage] when a page arrives, never by [_onSession]
+  /// when one is asked for. Recording at ask time consumes the trigger even
+  /// when the fetch fails, and nothing comes back to re-ask: socket recovery
+  /// runs on the client's own backoff and never re-enters [connect], and the
+  /// post-reconnect `connection.ack` snapshot replays the SAME id and status,
+  /// so a burnt key matches it and stays quiet. That is the reported bug
+  /// rebuilt — a list stuck on "With an agent" for a conversation that ended,
+  /// or, when it happens on first open, the silently empty list this whole
+  /// parameter exists to fix.
+  ///
+  /// Left unrecorded, a failure simply means the next snapshot to arrive
+  /// tries again. Retries therefore ride on session traffic rather than a
+  /// timer this class would then have to own, cancel and test.
+  (String, ChatStatus, String?)? _listedSessionKey;
+
+  /// The key of the ask currently out, promoted into [_listedSessionKey] once
+  /// its page lands. Null when the ask came from [connect], which is not for
+  /// any particular snapshot.
+  (String, ChatStatus, String?)? _pendingSessionKey;
 
   /// The raw `POST /chat/sessions/{id}/report-issue` route, or null when the
   /// host wired none up — in which case the ⋯ menu does not offer the row at
@@ -379,6 +564,12 @@ class ChatWidgetCubit extends Cubit<ChatWidgetState> {
   /// neither the state nor the slot still emits nothing.
   @override
   void emit(ChatWidgetState state) {
+    // The one funnel every surface change already passes through, which is
+    // why the diagnostic hangs off it rather than off `_syncSurfaces`:
+    // `release` and `cancel` re-run the slot's own sync and would each need
+    // their own call. Reads the INCOMING state because that is the one whose
+    // identity is about to be on screen.
+    _warnIfAskingAGuestForDetails(state);
     super.emit(
       state.copyWith(
         activeSurface: _surfaces.active,
@@ -390,6 +581,64 @@ class ChatWidgetCubit extends Cubit<ChatWidgetState> {
         csatBySession: Map<String, CsatLookup>.unmodifiable(_csatBySession),
       ),
     );
+  }
+
+  /// Whether [_warnIfAskingAGuestForDetails] has already said its piece.
+  ///
+  /// One line per Cubit. The gate stays up across many ticks and every one of
+  /// them re-emits, so without this the console fills with the same paragraph
+  /// and the paragraph stops being read.
+  bool _warnedAboutGuestPreChat = false;
+
+  /// Tells an integrator, in debug builds only, that the widget is about to
+  /// ask a visitor it considers a GUEST for their details.
+  ///
+  /// ── The report this exists for ─────────────────────────────────────────
+  ///
+  /// "My signed-in customer is being asked to type their name in", twice,
+  /// from two different integrators. Both had authenticated the customer,
+  /// both passed a real customer token, and both were treated as guests —
+  /// correctly, by the rule `chat_identity.dart` states at length: a guest is
+  /// a visitor whose [ChatIdentity.profile] is ABSENT. The token cannot be
+  /// the discriminator (this package cannot read it, by design, and a guest
+  /// session carries one too) and `userId` cannot be either (chat-service
+  /// mints one for every visitor). So a host that authenticates perfectly and
+  /// omits `profile` gets a guest, and — until this — got one SILENTLY.
+  ///
+  /// ── Why here, and not at construction ──────────────────────────────────
+  ///
+  /// A guest-only deployment is an ordinary deployment; warning every host
+  /// that builds a Cubit with the default identity would print a paragraph on
+  /// every launch of an app that has nothing to fix, and a warning that cries
+  /// wolf on every launch is the one nobody reads on the day it matters.
+  ///
+  /// This fires at the moment the consequence becomes VISIBLE instead: the
+  /// pre-chat gate going up in front of a guest is precisely the moment a
+  /// host who believed their customer was signed in is being contradicted on
+  /// screen. A guest deployment whose merchant never switched pre-chat on
+  /// never reaches it and never hears from this at all.
+  ///
+  /// ── What it must never carry ───────────────────────────────────────────
+  ///
+  /// No token, no prefix of one, not even its length — `cognito-verifier.ts`
+  /// in the backend spells out why a prefix alone is enough to correlate a
+  /// credential — and no profile contents. There is nothing to redact here
+  /// because nothing identifying is read: the message is a constant, the
+  /// condition is two booleans, and the token is not something this class can
+  /// see in the first place. The same rule `voice_recorder.dart` states for
+  /// audio.
+  ///
+  /// Debug only, and through [debugPrint] rather than
+  /// `FlutterError.reportError`: this is advice, not a fault. Reporting it as
+  /// an error would fail the widget tests of every host with a legitimate
+  /// guest-only deployment and put a non-error in whatever crash reporter
+  /// they wired `FlutterError.onError` to.
+  void _warnIfAskingAGuestForDetails(ChatWidgetState next) {
+    if (_warnedAboutGuestPreChat) return;
+    if (!kDebugMode) return;
+    if (_surfaces.active is! PreChatSurface || !next.isGuest) return;
+    _warnedAboutGuestPreChat = true;
+    debugPrint(_kGuestPreChatWarning);
   }
 
   /// The facts [ProductSurfaceSlot.sync] judges, gathered from their owners.
@@ -464,7 +713,43 @@ class ChatWidgetCubit extends Cubit<ChatWidgetState> {
   /// network I/O as a side effect of being constructed is untestable by
   /// construction, and the root widget (which owns this Cubit's lifetime)
   /// is the natural, single place to call this once, from `initState`.
-  Future<void> connect() => _client.connect();
+  Future<void> connect() {
+    // The panel-open fetch, and the first of the two triggers a host would
+    // otherwise have to remember. This is the widget's own "we are open now"
+    // hop — `ChatWidget.initState` calls it — so the list arrives without the
+    // host wiring a second thing to the same moment.
+    _refreshSessionList();
+    return _client.connect();
+  }
+
+  /// Asks [sessionSource] for a fresh page, if the host supplied one.
+  ///
+  /// Not awaited and never awaited: a session list is not on the path of
+  /// anything the customer is waiting for, and `SessionListRefresher.refresh`
+  /// never throws — a failed fetch reaches `onError` and leaves the page
+  /// already on screen alone.
+  void _refreshSessionList() {
+    final SessionListRefresher? sessions = _sessionList;
+    if (sessions == null) return;
+    unawaited(sessions.refresh());
+  }
+
+  /// A page from [sessionSource], on its way to the screen.
+  ///
+  /// The write is the whole point; the line under it is the bookkeeping that
+  /// makes a FAILED fetch retryable — see [_listedSessionKey] on why the key
+  /// is recorded here rather than where the fetch is asked for.
+  void _onSessionPage(List<ChatSessionSummary> sessions) {
+    updateSessionSummaries(sessions);
+    // Not yet, if the refresher already owes a re-issue: an ask that arrived
+    // DURING this fetch means this page predates it, and claiming the newer
+    // key for it would burn that key on a page that never reflected it. The
+    // re-issue's own landing records it — and if the re-issue fails, nothing
+    // is recorded and the next snapshot asks again, which is the same rule
+    // one level down.
+    if (_sessionList?.isRefreshQueued ?? false) return;
+    _listedSessionKey = _pendingSessionKey;
+  }
 
   // ── Connectivity ──────────────────────────────────────────────────────
 
@@ -520,10 +805,16 @@ class ChatWidgetCubit extends Cubit<ChatWidgetState> {
     _syncSurfaces();
   }
 
-  /// Supplies the Messages/Home screens' session list. See
-  /// [ChatSessionSummary]'s header on why this Cubit cannot populate this
-  /// itself — `dhaam_chat` cannot list sessions, so a host that has its own
-  /// backend calls this with what it fetched there.
+  /// Supplies the Messages/Home screens' session list.
+  ///
+  /// The direct route, for a host that already fetches its own page and wants
+  /// to decide when. A host that would rather not own that timing can hand
+  /// the fetch over instead — see the `sessionSource` constructor parameter,
+  /// which drives this same method from inside.
+  ///
+  /// Either way the page comes from OUTSIDE: `dhaam_chat` cannot list
+  /// sessions at all, so this Cubit never invents one. See
+  /// [ChatSessionSummary]'s header.
   void updateSessionSummaries(List<ChatSessionSummary> summaries) {
     final int unread = summaries.fold(
         0, (int sum, ChatSessionSummary s) => sum + s.unreadCount);
@@ -1535,6 +1826,35 @@ class ChatWidgetCubit extends Cubit<ChatWidgetState> {
     if (session.sessionId != _parkedSessionId) _parkedSessionId = null;
     emit(state.copyWith(session: session));
     _syncSurfaces();
+    // The second trigger. A snapshot arrives for every session change this
+    // Cubit can see, and most of them are routine live-conversation traffic
+    // that leaves the list looking exactly as it already does; refetching a
+    // whole page for each would be a request per event to redraw the same
+    // rows. So the ask is filtered down to the fields a summary ROW is drawn
+    // from — [_listedSessionKey] is where those three are named and where
+    // the rule for adding a fourth is.
+    //
+    // A field of its own rather than a read of the previous `state.session`,
+    // which is the same value today only because this line is that field's
+    // only writer. This one names what it actually is — the last snapshot
+    // the LIST actually got a page for — so a future write of
+    // `state.session` from somewhere else cannot silently change the list's
+    // cadence.
+    //
+    // Asking DURING a flight is not dropped: the refresher re-issues once
+    // that flight lands, and a burst collapses into one re-issue.
+    final (String, ChatStatus, String?) key = (
+      session.sessionId,
+      session.status,
+      session.handledBy?.displayName,
+    );
+    if (key != _listedSessionKey) {
+      // Recorded as PENDING, not as listed. The promotion happens in
+      // [_onSessionPage] when a page actually lands, so a fetch that fails
+      // leaves this trigger armed for the next snapshot to fire again.
+      _pendingSessionKey = key;
+      _refreshSessionList();
+    }
   }
 
   /// A `session.closed` push (§12.5).
@@ -1594,6 +1914,10 @@ class ChatWidgetCubit extends Cubit<ChatWidgetState> {
 
   @override
   Future<void> close() async {
+    // First: a page landing after `super.close()` would be an emit on a
+    // closed Cubit. An in-flight fetch is not cancellable, so its answer is
+    // dropped on arrival instead.
+    _sessionList?.dispose();
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     await _csatSub?.cancel();

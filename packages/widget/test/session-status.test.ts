@@ -126,6 +126,12 @@ describe("Home's recent conversation shows a status for every session", () => {
       const pill = home.node.querySelector<HTMLElement>('.dh-home-recent-status');
       expect(pill?.textContent).toBe(statusPill(status));
       // The named regression: OPEN, ASSIGNED and ON_HOLD used to land here.
+      //
+      // This is the PILL's own `hidden`, not the section's. Home only SHOWS
+      // the recent section for an OPEN conversation (see the D4 block at the
+      // bottom of this file), so for the other five the row below is filled
+      // in correctly inside a hidden section — which is the point: the
+      // vocabulary stays total whatever the visibility rule does next.
       expect(pill?.hidden).toBe(false);
       expect(pill?.getAttribute('data-status')).toBe(status);
     });
@@ -142,6 +148,68 @@ describe("Home's recent conversation shows a status for every session", () => {
     document.body.appendChild(home.node);
     home.update(null, '', ASSUMED_ENTRY);
     expect(home.node.querySelector<HTMLElement>('.dh-home-section')?.hidden).toBe(true);
+  });
+});
+
+// ── D4: Home shows "Recent conversation" only for an OPEN one ─────────────
+//
+// The user's decision, in answer to a direct question and in their own words:
+// "in home only open recent conversation if not then display none."
+//
+// They were shown a broader option — hide only RESOLVED and CLOSED, keeping
+// the three live-but-not-open states — and chose the narrow one. WAITING,
+// ASSIGNED and ON_HOLD are hidden here on purpose, not by oversight, so this
+// is asserted status by status rather than as "not resolved and not closed":
+// a future edit that widens it fails loudly instead of quietly being kinder.
+//
+// Nothing becomes unreachable. Every conversation, in every status, is still
+// listed on the Messages screen, reached from the bottom tab bar that is on
+// screen whenever Home is — this section is a shortcut back into the one
+// conversation still going, not the list. NOT via Home's "See all": that
+// button is a child of the section this hides, so it goes when the section
+// goes. The Messages tab is the whole surviving route.
+//
+// The pill's WORDS are still computed for every status (the loop above), so
+// the section is hidden with correct content inside it rather than emptied.
+// That keeps this a visibility decision, and keeps the vocabulary total.
+describe("Home's recent conversation appears only when it is still OPEN", () => {
+  function homeShowing(recent: ChatSessionSummary | null): boolean {
+    const home = createHomeScreen({
+      onStartNew: vi.fn(),
+      onOpenConversation: vi.fn(),
+      onSeeAll: vi.fn(),
+      onLeaveMessage: vi.fn(),
+      onChooseChat: vi.fn(),
+    });
+    document.body.appendChild(home.node);
+    home.update(recent, '', ASSUMED_ENTRY);
+    const section = home.node.querySelector<HTMLElement>('.dh-home-section');
+    if (section === null) throw new Error('no recent section');
+    return !section.hidden;
+  }
+
+  it('shows the section for an OPEN conversation', () => {
+    expect(homeShowing(summary({ status: 'OPEN' }))).toBe(true);
+  });
+
+  for (const status of ALL_STATUSES.filter((candidate) => candidate !== 'OPEN')) {
+    it(`hides the section for ${status}`, () => {
+      expect(homeShowing(summary({ status }))).toBe(false);
+    });
+  }
+
+  it('hides the section when there is no recent conversation at all', () => {
+    expect(homeShowing(null)).toBe(false);
+  });
+
+  // `widget.ts`'s `mostRecentSession` still picks the newest session OVERALL,
+  // and that is deliberate and unchanged: it is not "the newest OPEN one".
+  // So a visitor whose newest conversation was just closed sees no Recent
+  // section even though an older OPEN one exists. Approved as-is — the older
+  // one is one tap away on Messages, and a Home shortcut that skips past the
+  // conversation you were last in is more confusing than no shortcut.
+  it('hides the section for a closed newest conversation, older OPEN one or not', () => {
+    expect(homeShowing(summary({ id: 'newest', status: 'CLOSED' }))).toBe(false);
   });
 });
 

@@ -2,8 +2,9 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createHeroHeader, type HeroContent } from '../src/ui/hero-header.js';
+import { createHeroHeader, heroContentFrom, type HeroContent } from '../src/ui/hero-header.js';
 import { STYLES } from '../src/ui/styles.js';
+import type { HeaderAppearance } from '../src/config.js';
 
 function content(overrides: Partial<HeroContent> = {}): HeroContent {
   return {
@@ -12,6 +13,33 @@ function content(overrides: Partial<HeroContent> = {}): HeroContent {
     showAvatars: true,
     showPresence: true,
     avatars: ['https://cdn.acme.test/a.png', 'https://cdn.acme.test/b.png'],
+    greeting: 'Hello there',
+    subGreeting: 'Ask us anything',
+    ...overrides,
+  };
+}
+
+/**
+ * A published `HeaderAppearance`, field for field as the console writes it.
+ *
+ * Needed as its own helper because `ctaEnabled`/`ctaTitle`/`ctaSubtitle` no
+ * longer exist on `HeroContent` — they are wire schema and stop at
+ * `heroContentFrom`. Asserting "an enabled CTA renders nothing" therefore has
+ * to start from the shape that still HAS them, or it asserts nothing at all.
+ */
+function appearance(overrides: Partial<HeaderAppearance> = {}): HeaderAppearance {
+  return {
+    background: 'gradient',
+    backgroundColor: '',
+    colorSource: 'accent',
+    gradientStrength: 100,
+    backgroundImageUrl: '',
+    imageOverlay: 45,
+    showLogo: true,
+    logoUrl: 'https://cdn.acme.test/logo.png',
+    showAvatars: true,
+    avatars: ['https://cdn.acme.test/a.png', 'https://cdn.acme.test/b.png'],
+    showPresence: true,
     greeting: 'Hello there',
     subGreeting: 'Ask us anything',
     ctaEnabled: true,
@@ -79,10 +107,9 @@ beforeEach(() => {
 });
 
 function build() {
-  const onCallToAction = vi.fn();
-  const hero = createHeroHeader({ onCallToAction });
+  const hero = createHeroHeader();
   document.body.appendChild(hero.node);
-  return { hero, onCallToAction };
+  return { hero };
 }
 
 /**
@@ -112,16 +139,63 @@ function tallScrollHost(hero: { node: HTMLElement }): HTMLElement {
 }
 
 describe('createHeroHeader — render', () => {
-  it('draws the logo, faces, greeting and CTA into the content layer', () => {
+  it('draws the logo, faces and greeting into the content layer', () => {
     const { hero } = build();
     hero.render(content());
 
     expect(hero.node.querySelector('.dh-hero-full .dh-hero-greeting')?.textContent).toBe('Hello there');
     expect(hero.node.querySelector('.dh-hero-full .dh-hero-sub')?.textContent).toBe('Ask us anything');
     expect(hero.node.querySelectorAll('.dh-hero-full .dh-hero-avatar')).toHaveLength(2);
-    expect(hero.node.querySelector('.dh-hero-full .dh-hero-cta-title')?.textContent).toBe(
-      'Send us a message',
+  });
+
+  // D3: exactly ONE "send us a message" affordance on Home. The hero only
+  // ever shows on Home, and `ui/home-screen.ts` builds `.dh-home-cta` there
+  // unconditionally, so a hero CTA is always a SECOND button leading to the
+  // identical destination — two visually different cards making the same
+  // offer, one of them not even reachable by keyboard. Home's card won.
+  //
+  // `header.ctaEnabled`/`ctaTitle`/`ctaSubtitle` still PARSE (they are the
+  // published wire schema — see src/config.ts and src/remote-config.ts); they
+  // simply no longer reach a rendered button.
+  it('renders no CTA of its own, even when the merchant enabled and titled one', () => {
+    const { hero } = build();
+    hero.render(heroContentFrom(appearance({ ctaEnabled: true, ctaTitle: 'Send us a message' }), ''));
+
+    expect(hero.node.querySelector('.dh-hero-cta')).toBeNull();
+    expect(hero.node.querySelector('.dh-hero-cta-title')).toBeNull();
+    expect(hero.node.querySelector('.dh-hero-cta-sub')).toBeNull();
+    // Nothing pressable is left in the block at all, which is what makes its
+    // `aria-hidden` structurally safe rather than maintained by hand.
+    expect(hero.node.querySelector('button')).toBeNull();
+    // The greeting still arrives — this is the CTA being dropped, not the
+    // whole publish being ignored.
+    expect(hero.node.querySelector('.dh-hero-greeting')?.textContent).toBe('Hello there');
+  });
+
+  // The interaction between D3 and D2. A merchant whose ONLY enabled hero
+  // element was the CTA now has a hero with zero children — which is exactly
+  // what `data-empty="true"` means, so the hero hides itself and the band's
+  // straddle guard (`:not([data-empty="true"])`, ui/styles.ts) retracts the
+  // overhang with it. Nothing is left half-painted.
+  it('marks a CTA-only hero empty, now that the CTA is gone', () => {
+    const { hero } = build();
+    hero.render(
+      heroContentFrom(
+        appearance({
+          showLogo: false,
+          showAvatars: false,
+          greeting: '',
+          subGreeting: '',
+          ctaEnabled: true,
+          ctaTitle: 'Send us a message',
+          ctaSubtitle: 'We usually reply instantly',
+        }),
+        '',
+      ),
     );
+
+    expect(hero.node.querySelector('.dh-hero-full')?.children).toHaveLength(0);
+    expect(hero.node.dataset['empty']).toBe('true');
   });
 
   it('has no compact layer — collapsed means gone, not a 66px bar', () => {
@@ -158,7 +232,6 @@ describe('createHeroHeader — render', () => {
         showAvatars: false,
         greeting: '',
         subGreeting: '',
-        ctaEnabled: false,
       }),
     );
 

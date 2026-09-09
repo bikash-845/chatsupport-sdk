@@ -256,12 +256,33 @@ describe('the gate is exactly sessions.length > 0 — now expressed as rows, not
     expect(messagesPane().querySelector('.dh-messages-empty')?.textContent).toBe('No conversations yet.');
   });
 
+  // `status: 'OPEN'` explicitly, overriding the fixture's `RESOLVED`: Home
+  // shows the recent row only for a conversation that is still open (see
+  // `ui/home-screen.ts`'s `SHOWN_IN_RECENT` and the D4 block in
+  // session-status.test.ts). This test is about the GATE — sessions exist, so
+  // Home mounts with a row rather than the panel becoming a conversation — so
+  // it has to hand Home a session the row is shown for, or it proves nothing
+  // about the gate and everything about the status rule.
   it('Home shows the most recent session as its own row', async () => {
-    sessionRows = [summaryRow({ id: 'sess_past' })];
+    sessionRows = [summaryRow({ id: 'sess_past', status: 'OPEN', closedAt: null })];
     await openedWidget();
 
     expect(visible(homePane())).toBe(true);
     expect(homeShowsRecentRow()).toBe(true);
+  });
+
+  // The same gate, the other side of the status rule: sessions exist, Home
+  // still mounts as Home, and the recent row is simply not offered — the
+  // conversation is over and Messages is where the finished ones live.
+  it('Home mounts without a recent row when the newest session is finished', async () => {
+    sessionRows = [summaryRow({ id: 'sess_past', status: 'RESOLVED' })];
+    await openedWidget();
+
+    expect(visible(homePane())).toBe(true);
+    expect(homeShowsRecentRow()).toBe(false);
+    // Not lost, just not on Home.
+    await goToMessages();
+    expect(messagesRows()).toHaveLength(1);
   });
 
   it('Messages renders one row per session', async () => {

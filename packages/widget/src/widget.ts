@@ -1483,15 +1483,17 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
   const commonQuestionsHost = el('div', { attrs: { class: 'dh-common-questions-host', hidden: true } });
 
   /**
-   * The hero header's content block — greeting, faces, call to action.
+   * The hero header's content block — logo, faces, greeting, sub-line.
    *
    * Shown only on the Home screen and only under `design: 'hero'` — see
-   * {@link syncScreens}. The CTA opens the same new-conversation flow every
-   * other "start a conversation" affordance opens (Home's own CTA card,
-   * Messages' "New conversation" button); see `ui/hero-header.ts` for the
-   * one thing that stays a judgement call once three affordances lead there.
+   * {@link syncScreens}. It takes no callbacks and contains nothing pressable:
+   * it used to build a call-to-action button wired to
+   * {@link openNewConversationFlow}, but the hero only ever shows on Home and
+   * Home always draws its own CTA card, so that was always a second card
+   * making the same offer. `ui/hero-header.ts`'s module header records why
+   * Home's is the one that stayed.
    */
-  const heroHeader = createHeroHeader({ onCallToAction: () => openNewConversationFlow() });
+  const heroHeader = createHeroHeader();
 
   /**
    * The header's avatar slot.
@@ -1920,31 +1922,59 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
     },
     children: [
       el('span', { attrs: { class: 'dh-grip', 'aria-hidden': 'true' } }),
-      el('header', {
-        attrs: { class: 'dh-header' },
+      // ── The brand band ───────────────────────────────────────────────
+      //
+      // The header row, the offline banner and the hero, wrapped in ONE
+      // element so that under `design: 'hero'` the merchant's colour and
+      // gradient are ONE paint rather than three. Why one paint on the
+      // parent is not the same thing as the same paint on each child — the
+      // restarting fade, the seam it left, and what that costs in exchange —
+      // is told once, in ui/styles.ts's
+      // `:host([data-design="hero"]) .dh-brand-band` rule. This file owns
+      // only the SHAPE.
+      //
+      // A plain `div` with no role, no label and no tabindex, deliberately:
+      // it is a paint surface and a layout box, and it must be invisible to
+      // the a11y tree and to the focus order. The `<header>` landmark stays
+      // where it was, on the row that actually is one.
+      //
+      // Nothing here may gain a `z-index`, a `transform`, a `filter` or
+      // anything else that opens a stacking context — see `.dh-brand-band`
+      // in ui/styles.ts for the header menu that would be trapped by one.
+      el('div', {
+        attrs: { class: 'dh-brand-band' },
         children: [
-          // Shown only once there is somewhere to go back TO — see
-          // `screens.ts`'s own back-stack rules and this file's `onChange`
-          // above, which is the one place `backButton.hidden` is set.
-          backButton,
-          avatarHost,
-          el('div', { children: [identityHeader.node, status] }),
-          el('div', { attrs: { class: 'dh-header-spacer' } }),
-          reconnectButton,
-          headerMenu.node,
-          closeButton,
+          el('header', {
+            attrs: { class: 'dh-header' },
+            children: [
+              // Shown only once there is somewhere to go back TO — see
+              // `screens.ts`'s own back-stack rules and this file's `onChange`
+              // above, which is the one place `backButton.hidden` is set.
+              backButton,
+              avatarHost,
+              el('div', { children: [identityHeader.node, status] }),
+              el('div', { attrs: { class: 'dh-header-spacer' } }),
+              reconnectButton,
+              headerMenu.node,
+              closeButton,
+            ],
+          }),
+          // Above the hero header and every screen, because it outranks all
+          // of them: a customer with no signal needs to know that before they
+          // read a greeting. Its own band rather than a line inside the
+          // header — see ui/offline-banner.ts for why the status line under
+          // the title was not enough on its own. Still directly under the
+          // header row, which is the position its live region's usefulness
+          // depends on; only its parent changed.
+          offlineBanner.node,
+          // Directly under the header row and painted as its continuation, so
+          // the two read as one tall header rather than as a banner stacked
+          // on a bar — which is now literally true rather than approximated,
+          // because the paint belongs to the wrapper around both.
+          // Shown only on Home — see `syncScreens`.
+          heroHeader.node,
         ],
       }),
-      // Above the hero header and every screen, because it outranks all of
-      // them: a customer with no signal needs to know that before they read a
-      // greeting. Its own band rather than a line inside the header — see
-      // ui/offline-banner.ts for why the status line under the title was not
-      // enough on its own.
-      offlineBanner.node,
-      // Directly under the header row and painted as its continuation, so the
-      // two read as one tall header rather than as a banner stacked on a bar.
-      // Shown only on Home — see `syncScreens`.
-      heroHeader.node,
       // The three screens `ui/screens.ts` knows about. `conversation` has no
       // node of its own here: it is whichever of surfaceHost/messageList.log
       // is showing, exactly the same "stand in for the transcript" mechanism
@@ -3691,8 +3721,8 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
 
     // Common Questions and the hero banner are both Home furniture now —
     // see home-screen.ts's own header on why it arranges rather than owns
-    // the shared Common Questions component, and hero-header.ts's on why its
-    // CTA now opens the same new-conversation flow Home's own CTA does.
+    // the shared Common Questions component, and hero-header.ts's on why the
+    // hero draws no CTA of its own, leaving Home's card the only one.
     setPaneVisible(commonQuestionsHost, onHome && remote.commonQuestions.length > 0);
     setPaneVisible(heroHeader.node, onHome && design === 'hero');
 
