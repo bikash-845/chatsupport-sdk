@@ -169,7 +169,11 @@ export function sessionBelongsToTab(
 
   // Primary: use server-provided chatType when available
   if (s.chatType === 'merchant') {
-    return tab === 'merchants';
+    // For a merchant viewer: admin↔merchant sessions carry chatType='merchant'
+    // (because the target IS the merchant). The merchant's 2nd tab has key 'admin',
+    // so we must match on 'admin' (or 'merchants' which is the same slot key-wise).
+    // For an admin viewer: correctly routed to the 'merchants' tab.
+    return isMerchantUser ? (tab === 'admin' || tab === 'merchants') : tab === 'merchants';
   }
   if (s.chatType === 'customer') {
     return tab === 'customers';

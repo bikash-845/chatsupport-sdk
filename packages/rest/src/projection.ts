@@ -661,7 +661,16 @@ function toHandledBy(value: unknown): RestSessionHandledBy | undefined {
 export function toChatSessionSummary(row: unknown): RestChatSessionSummary {
   const source = asRecord(row, 'a session summary row');
 
+  // Start with all server-provided fields so that enrichment properties like
+  // `chatType`, `merchantName`, `storeName`, `adminName`, `adminEmail`,
+  // `merchantEmail`, `storeEmail`, `customerName`, `customerEmail`, `targetRole`,
+  // `targetId`, `targetName`, and `targetEmail` reach the widget's tab-routing
+  // and display logic (messages-screen.ts).  These fields are additive — the
+  // widget reads them via `summary as any` — so unknown extras are harmless.
+  // The validated fields below overwrite their raw counterparts to ensure
+  // `status`, `mode`, `createdAt`, etc. always arrive in the correct shape.
   const summary: RestChatSessionSummary = {
+    ...(source as Partial<RestChatSessionSummary>),
     id: requireString(source['id'], 'summary.id'),
     status: decodeStringEnum<RestChatStatus>(CHAT_STATUS_VALUES, source['status'], 'summary.status'),
     mode: decodeStringEnum<RestChatMode>(CHAT_MODE_VALUES, source['mode'], 'summary.mode'),
