@@ -785,7 +785,11 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
    * `ui/home-screen.ts`'s own empty states, and there is no second one
    * anywhere in this package.
    */
-  const initialScreenName: ScreenName = config.sessionId === undefined ? 'home' : 'conversation';
+  const initialScreenName: ScreenName =
+    (config as any).initialScreen ??
+    ((config as any).target !== undefined || config.sessionId !== undefined
+      ? 'conversation'
+      : 'messages');
 
   const report = (error: unknown): void => config.onError(error);
 
@@ -3718,6 +3722,11 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
     // and there is no tab for `conversation` to begin with (see nav.ts).
     setPaneVisible(nav.node, !onConversation);
     backButton.hidden = !screens.canGoBack();
+
+    // Stamp the current screen onto the host element so CSS can target it:
+    // `:host([data-screen="conversation"])` applies the purple gradient header
+    // and the pink-teal thread background (ui/styles.ts Dhaam UI section).
+    host.setAttribute('data-screen', current);
 
     // Common Questions and the hero banner are both Home furniture now —
     // see home-screen.ts's own header on why it arranges rather than owns

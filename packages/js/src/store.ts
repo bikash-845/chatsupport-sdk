@@ -91,8 +91,15 @@ function defaultOnError(error: unknown): void {
   // one broken selector. Silence is the only worse option — a subscription
   // that has quietly stopped updating is the single hardest widget bug to
   // diagnose, which is why this defaults to loud instead of off.
-  if (typeof console !== 'undefined' && typeof console.error === 'function') {
-    console.error(
+  //
+  // `globalThis.console` rather than a bare `console` reference: this package
+  // deliberately excludes the DOM lib (see tsconfig.json), which is what
+  // puts `console` in scope for TS. `globalThis` IS in ES2020, and both
+  // browsers and Node expose `console` on it, so this is equivalent at
+  // runtime while satisfying the stricter lib constraint at compile time.
+  const con = (globalThis as { console?: { error?: (...a: unknown[]) => void } }).console;
+  if (con !== undefined && typeof con.error === 'function') {
+    con.error(
       '[@dhaam-ccrm/js] a subscriber threw; every other subscriber is unaffected and this one ' +
         'will recover on the next snapshot. Pass createChatStore(client, { onError }) to handle it yourself.',
       error,

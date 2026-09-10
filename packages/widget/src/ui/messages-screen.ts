@@ -34,6 +34,12 @@
 // rather than requesting a smaller page, which keeps every row's identity
 // (and a keyboard user's focus, if it happened to be on one) stable across
 // keystrokes.
+//
+// ── Redesign: Dhaam UI (Customers / Merchants tabs) ───────────────────────
+//
+// The new design shows two tabs at the top: "Customers" and "Merchants".
+// For now all sessions are shown under "Merchants" (the admin's merchant
+// conversations). "Customers" tab is reserved for future use.
 
 import type { ChatSessionSummary } from '@dhaam-ccrm/js';
 
@@ -61,11 +67,35 @@ export interface MessagesScreenView {
 /** Heroicons' `magnifying-glass` outline, stroked like every other glyph `icon()` draws. */
 const SEARCH_ICON = ['m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z'];
 
+/** Chevron-right icon for conversation row. */
+const CHEVRON_ICON = ['M8.25 4.5l7.5 7.5-7.5 7.5'];
+
 /** Whether `session` should stay visible under `query` — `''` matches everything. */
 function matchesQuery(session: ChatSessionSummary, query: string): boolean {
   if (query === '') return true;
   const haystack = `${statusLabel(session.status)} ${session.lastMessagePreview ?? ''}`.toLowerCase();
   return haystack.includes(query);
+}
+
+/** Extract initials from a session identifier for the avatar circle. */
+function sessionInitials(session: ChatSessionSummary): string {
+  // Use first 1-2 chars of the session id or preview as avatar initials
+  const preview = session.lastMessagePreview ?? '';
+  if (preview.length > 0) return preview.charAt(0).toUpperCase();
+  return 'C';
+}
+
+/** Map a status string to a display label for the pill. */
+function pillLabel(status: string): string {
+  switch (status) {
+    case 'OPEN': return 'Open';
+    case 'CLOSED': return 'Closed';
+    case 'RESOLVED': return 'Resolved';
+    case 'ON_HOLD': return 'On Hold';
+    case 'WAITING_FOR_AGENT': return 'Waiting';
+    case 'ASSIGNED': return 'Assigned';
+    default: return statusLabel(status as any);
+  }
 }
 
 interface MessageRow {
@@ -74,20 +104,40 @@ interface MessageRow {
 }
 
 function createMessageRow(onSelect: (sessionId: string) => void): MessageRow {
-  const status = el('span', { attrs: { class: 'dh-messages-status' } });
-  const time = el('time', { attrs: { class: 'dh-messages-time' } });
-  const top = el('span', { attrs: { class: 'dh-messages-row-top' }, children: [status, time] });
-  const preview = el('span', { attrs: { class: 'dh-messages-preview' } });
-  const unread = el('span', { attrs: { class: 'dh-messages-unread' } });
+  // Avatar circle (initial letter)
+  const avatarText = el('span', { attrs: { class: 'dh-mrow-avatar-text' } });
+  const avatar = el('div', { attrs: { class: 'dh-mrow-avatar' }, children: [avatarText] });
+
+  // Name (bold, left)
+  const name = el('span', { attrs: { class: 'dh-mrow-name' } });
+  // Status pill
+  const statusPill = el('span', { attrs: { class: 'dh-mrow-status-pill' } });
+  // Unread badge (circle, right side)
+  const unreadBadge = el('span', { attrs: { class: 'dh-mrow-unread-badge', hidden: true } });
+  // Chevron
+  const chevron = el('span', { attrs: { class: 'dh-mrow-chevron', 'aria-hidden': 'true' }, children: [icon(CHEVRON_ICON, 14)] });
+
+  // Top row: name + pill | badge + chevron
+  const nameRow = el('div', { attrs: { class: 'dh-mrow-name-row' }, children: [name, statusPill] });
+  const rightCol = el('div', { attrs: { class: 'dh-mrow-right' }, children: [unreadBadge, chevron] });
+  const topRow = el('div', { attrs: { class: 'dh-mrow-top' }, children: [nameRow, rightCol] });
+
+  // Preview text
+  const preview = el('span', { attrs: { class: 'dh-mrow-preview', hidden: true } });
+  // Timestamp
+  const time = el('time', { attrs: { class: 'dh-mrow-time' } });
+
+  // Body: preview + time
+  const body = el('div', { attrs: { class: 'dh-mrow-body' }, children: [topRow, preview, time] });
 
   const button = el('button', {
     // Never `disabled` — see session-picker.ts's module header: a terminal
     // status is information shown via the pill, not a reason to disable the
     // row underneath it.
-    attrs: { class: 'dh-messages-row', type: 'button' },
-    children: [top, preview, unread],
+    attrs: { class: 'dh-mrow-btn', type: 'button' },
+    children: [avatar, body],
   });
-  const node = el('li', { attrs: { class: 'dh-messages-item' }, children: [button] });
+  const node = el('li', { attrs: { class: 'dh-mrow-item' }, children: [button] });
 
   let current: ChatSessionSummary | null = null;
   button.addEventListener('click', () => {
@@ -103,7 +153,15 @@ function createMessageRow(onSelect: (sessionId: string) => void): MessageRow {
       if (isCurrent) button.setAttribute('aria-current', 'true');
       else button.removeAttribute('aria-current');
 
-      status.textContent = statusLabel(summary.status);
+      // Avatar initials
+      avatarText.textContent = sessionInitials(summary);
+
+      // Name: use preview first word or "Conversation" as display name
+      name.textContent = `Conversation`;
+
+      // Status pill
+      statusPill.textContent = pillLabel(summary.status);
+      statusPill.setAttribute('data-status', summary.status);
 
       const whenIso = summary.lastMessageAt ?? summary.createdAt;
       if (time.getAttribute('datetime') !== whenIso) time.setAttribute('datetime', whenIso);
@@ -116,8 +174,8 @@ function createMessageRow(onSelect: (sessionId: string) => void): MessageRow {
       const hasUnread = summary.unreadCount > 0;
       // Capped like the nav tab's own badge (ui/nav.ts) — a real count past
       // 99 tells the customer nothing the cap does not.
-      unread.textContent = hasUnread ? (summary.unreadCount > 99 ? '99+' : String(summary.unreadCount)) : '';
-      unread.hidden = !hasUnread;
+      unreadBadge.textContent = hasUnread ? (summary.unreadCount > 99 ? '99+' : String(summary.unreadCount)) : '';
+      unreadBadge.hidden = !hasUnread;
 
       // The one spoken account of this row — never derived from the visible
       // spans themselves, same split session-picker.ts's `describeRow` uses
@@ -137,6 +195,33 @@ function createMessageRow(onSelect: (sessionId: string) => void): MessageRow {
 }
 
 export function createMessagesScreen(callbacks: MessagesScreenCallbacks): MessagesScreenView {
+  // ── Tab bar: Customers | Merchants ──────────────────────────────────────
+  const customersCountBadge = el('span', { attrs: { class: 'dh-mtab-count' }, text: '0' });
+  const merchantsCountBadge = el('span', { attrs: { class: 'dh-mtab-count dh-mtab-count--active' }, text: '0' });
+
+  const customersTab = el('button', {
+    attrs: { class: 'dh-mtab', type: 'button', 'aria-selected': 'false', role: 'tab' },
+    children: [
+      el('span', { text: 'Customers' }),
+      customersCountBadge,
+    ],
+    on: { click: () => switchTab('customers') },
+  });
+  const merchantsTab = el('button', {
+    attrs: { class: 'dh-mtab dh-mtab--active', type: 'button', 'aria-selected': 'true', role: 'tab' },
+    children: [
+      el('span', { text: 'Merchants' }),
+      merchantsCountBadge,
+    ],
+    on: { click: () => switchTab('merchants') },
+  });
+
+  const tabBar = el('div', {
+    attrs: { class: 'dh-mtab-bar', role: 'tablist', 'aria-label': 'Conversation categories' },
+    children: [customersTab, merchantsTab],
+  });
+
+  // ── Search bar ──────────────────────────────────────────────────────────
   const searchInput = el('input', {
     attrs: {
       class: 'dh-messages-search-input',
@@ -155,10 +240,10 @@ export function createMessagesScreen(callbacks: MessagesScreenCallbacks): Messag
     ],
   });
 
+  // ── Conversation list ────────────────────────────────────────────────────
   const empty = el('li', { attrs: { class: 'dh-messages-empty' }, text: 'No conversations yet.' });
   // `role="list"` restored explicitly — see session-picker.ts's own note on
-  // Safari/VoiceOver dropping the implicit role once `list-style` is styled
-  // away.
+  // Safari/VoiceOver dropping the implicit role once `list-style` is styled away.
   const list = el('ul', {
     attrs: { class: 'dh-messages-list', role: 'list', 'aria-label': 'Your conversations' },
     children: [empty],
@@ -174,14 +259,44 @@ export function createMessagesScreen(callbacks: MessagesScreenCallbacks): Messag
     on: { click: () => callbacks.onStartNew() },
   });
 
-  const node = el('div', { attrs: { class: 'dh-messages' }, children: [search, list, newButton] });
+  const node = el('div', { attrs: { class: 'dh-messages' }, children: [tabBar, search, list, newButton] });
 
   const rows = new Map<string, MessageRow>();
   let allSessions: readonly ChatSessionSummary[] = [];
   let currentId: string | null = null;
+  let activeTab: 'customers' | 'merchants' = 'merchants';
+
+  function switchTab(tab: 'customers' | 'merchants'): void {
+    activeTab = tab;
+    if (tab === 'customers') {
+      customersTab.classList.add('dh-mtab--active');
+      customersTab.setAttribute('aria-selected', 'true');
+      merchantsTab.classList.remove('dh-mtab--active');
+      merchantsTab.setAttribute('aria-selected', 'false');
+      customersCountBadge.classList.add('dh-mtab-count--active');
+      merchantsCountBadge.classList.remove('dh-mtab-count--active');
+    } else {
+      merchantsTab.classList.add('dh-mtab--active');
+      merchantsTab.setAttribute('aria-selected', 'true');
+      customersTab.classList.remove('dh-mtab--active');
+      customersTab.setAttribute('aria-selected', 'false');
+      merchantsCountBadge.classList.add('dh-mtab-count--active');
+      customersCountBadge.classList.remove('dh-mtab-count--active');
+    }
+    applyFilter();
+  }
 
   function applyFilter(): void {
     const query = searchInput.value.trim().toLowerCase();
+    // "Customers" tab is reserved — show empty state there.
+    // "Merchants" tab shows all current sessions.
+    if (activeTab === 'customers') {
+      for (const [, row] of rows) row.node.hidden = true;
+      empty.textContent = 'No customer conversations yet.';
+      empty.hidden = false;
+      return;
+    }
+
     let anyVisible = false;
     for (const summary of allSessions) {
       const row = rows.get(summary.id);
@@ -205,6 +320,10 @@ export function createMessagesScreen(callbacks: MessagesScreenCallbacks): Messag
     render(sessions, currentSessionId) {
       allSessions = sessions;
       currentId = currentSessionId;
+
+      // Update tab counts
+      merchantsCountBadge.textContent = String(sessions.length);
+      customersCountBadge.textContent = '0';
 
       const live = new Set<string>();
       let previous: Node = empty;

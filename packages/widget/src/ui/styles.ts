@@ -3029,4 +3029,305 @@ button {
   font-weight: 600;
 }
 .dh-link-cancel:hover { background: var(--dh-surface-sunken); }
+
+/* ── Dhaam UI: Messages Screen Redesign ────────────────────────────────────
+   New design: Customers/Merchants tabs + new conversation card layout
+   (avatar circle · name · status pill · unread badge · preview · timestamp · chevron)
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Tab bar */
+.dh-mtab-bar {
+  flex: none;
+  display: flex;
+  border-bottom: 1.5px solid var(--dh-border);
+  margin-bottom: calc(var(--dh-space) * -1);
+}
+.dh-mtab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--dh-space) * 1.5);
+  padding: calc(var(--dh-space) * 3) 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--dh-text-muted);
+  border: 0;
+  background: transparent;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1.5px;
+  transition: color 120ms ease, border-color 120ms ease;
+  cursor: pointer;
+}
+.dh-mtab--active {
+  color: var(--dh-accent);
+  border-bottom-color: var(--dh-accent);
+  font-weight: 600;
+}
+.dh-mtab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--dh-surface-sunken);
+  color: var(--dh-text-muted);
+}
+.dh-mtab-count--active {
+  background: var(--dh-accent);
+  color: #fff;
+}
+
+/* Conversation row — new design */
+.dh-mrow-item {
+  list-style: none;
+}
+.dh-mrow-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--dh-space) * 3);
+  padding: calc(var(--dh-space) * 3) calc(var(--dh-space) * 2);
+  border: 0;
+  border-bottom: 1px solid var(--dh-border);
+  background: transparent;
+  text-align: start;
+  cursor: pointer;
+  transition: background 100ms ease;
+}
+.dh-mrow-btn:hover { background: var(--dh-surface-sunken); }
+.dh-mrow-btn[aria-current="true"] { background: color-mix(in srgb, var(--dh-accent) 6%, transparent); }
+
+/* Avatar circle */
+.dh-mrow-avatar {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: var(--dh-accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+/* Body layout */
+.dh-mrow-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--dh-space) * 0.5);
+}
+.dh-mrow-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--dh-space) * 2);
+}
+.dh-mrow-name-row {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--dh-space) * 2);
+  min-width: 0;
+  flex: 1;
+}
+.dh-mrow-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--dh-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Status pill — Open = purple/accent tinted, Closed/Resolved = neutral */
+.dh-mrow-status-pill {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px calc(var(--dh-space) * 2);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--dh-accent) 14%, transparent);
+  color: var(--dh-accent);
+}
+.dh-mrow-status-pill[data-status="CLOSED"],
+.dh-mrow-status-pill[data-status="RESOLVED"] {
+  background: var(--dh-surface-sunken);
+  color: var(--dh-text-muted);
+}
+.dh-mrow-status-pill[data-status="ON_HOLD"] {
+  background: color-mix(in srgb, #f59e0b 14%, transparent);
+  color: #b45309;
+}
+
+/* Right column: unread badge + chevron */
+.dh-mrow-right {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--dh-space) * 1.5);
+  flex: none;
+}
+/* Unread badge — filled circle like the screenshot */
+.dh-mrow-unread-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--dh-accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+.dh-mrow-chevron {
+  color: var(--dh-text-muted);
+  display: flex;
+}
+/* Preview text */
+.dh-mrow-preview {
+  font-size: 13px;
+  color: var(--dh-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Timestamp */
+.dh-mrow-time {
+  font-size: 11px;
+  color: var(--dh-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Dhaam UI: Chat Header Redesign ────────────────────────────────────────
+   Purple gradient header: back arrow, avatar circle with initials, name ·
+   agent, green online dot, ⋮ menu, × close button.
+   Applied when data-design="dhaam-chat" on :host, OR we patch the existing
+   hero header rules to show the gradient on the conversation screen too.
+/* ── Dhaam UI: Header & Screen Redesigns ─────────────────────────────────────
+   Matches exact user designs for both:
+   1. Messages screen (Customers/Merchants tabs, Dhaam AI logo, Close button)
+   2. Conversation screen (Purple gradient header, online dot, pastel chat background, purple bubbles)
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* 1. Header gradient for BOTH conversation and messages screens */
+:host([data-screen="conversation"]) .dh-brand-band,
+:host([data-screen="conversation"]) .dh-header,
+:host([data-screen="messages"]) .dh-brand-band,
+:host([data-screen="messages"]) .dh-header {
+  background: linear-gradient(135deg, #6d28d9 0%, #7c3aed 50%, #5b21b6 100%) !important;
+  color: #fff !important;
+  border-bottom-color: transparent !important;
+}
+
+/* 2. Messages Screen Header */
+:host([data-screen="messages"]) .dh-back,
+:host([data-screen="messages"]) .dh-avatar-host,
+:host([data-screen="messages"]) .dh-status,
+:host([data-screen="messages"]) .dh-reconnect,
+:host([data-screen="messages"]) .dh-menu {
+  display: none !important;
+}
+:host([data-screen="messages"]) .dh-title {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+  color: #fff !important;
+  font-size: 0 !important;
+  line-height: 1.1 !important;
+}
+:host([data-screen="messages"]) .dh-title::before {
+  content: "Dhaam AI" !important;
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.01em !important;
+  color: #fff !important;
+}
+:host([data-screen="messages"]) .dh-title::after {
+  content: "Lead The Pace With AI Grace" !important;
+  font-size: 10px !important;
+  font-weight: 400 !important;
+  opacity: 0.85 !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+:host([data-screen="messages"]) .dh-icon-button,
+:host([data-screen="conversation"]) .dh-icon-button {
+  color: #fff !important;
+  opacity: 0.95 !important;
+}
+:host([data-screen="messages"]) .dh-icon-button:hover,
+:host([data-screen="conversation"]) .dh-icon-button:hover {
+  background: rgba(255, 255, 255, 0.18) !important;
+  color: #fff !important;
+}
+
+/* 3. Hide bottom navigation bar completely (screens navigate directly) */
+.dh-nav {
+  display: none !important;
+}
+
+/* 4. Conversation Header */
+:host([data-screen="conversation"]) .dh-title {
+  color: #fff !important;
+  font-weight: 600 !important;
+}
+:host([data-screen="conversation"]) .dh-status {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+:host([data-screen="conversation"]) .dh-status-dot {
+  background: #10b981 !important;
+}
+:host([data-screen="conversation"]) .dh-avatar {
+  border: 2px solid rgba(255, 255, 255, 0.7) !important;
+  background: #f59e0b !important;
+  color: #78350f !important;
+  font-weight: 700 !important;
+}
+
+/* 5. Chat thread background: pastel pink-teal gradient (matches screenshot) */
+:host([data-screen="conversation"]) .dh-log {
+  background-color: #fbf7ff !important;
+  background-image:
+    radial-gradient(ellipse 85% 65% at 0% 0%, rgba(255, 205, 225, 0.5) 0%, transparent 65%),
+    radial-gradient(ellipse 85% 65% at 100% 0%, rgba(255, 235, 200, 0.4) 0%, transparent 65%),
+    radial-gradient(ellipse 85% 70% at 0% 100%, rgba(160, 245, 220, 0.45) 0%, transparent 65%),
+    radial-gradient(ellipse 90% 75% at 100% 100%, rgba(190, 225, 250, 0.5) 0%, transparent 70%) !important;
+  background-size: 100% 100% !important;
+  background-repeat: no-repeat !important;
+}
+
+/* 6. Outbound message bubble: solid purple */
+:host([data-screen="conversation"]) .dh-msg[data-mine="true"] .dh-msg-bubble {
+  background: #7c3aed !important;
+  color: #fff !important;
+  border-radius: 16px 16px 4px 16px !important;
+}
+:host([data-screen="conversation"]) .dh-msg[data-mine="true"] .dh-msg-time {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+:host([data-screen="conversation"]) .dh-msg[data-mine="true"] .dh-tick {
+  color: #34d399 !important;
+}
+
+/* 7. Inbound message bubble: crisp white card */
+:host([data-screen="conversation"]) .dh-msg[data-mine="false"] .dh-msg-bubble {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border-radius: 16px 16px 16px 4px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+}
+:host([data-screen="conversation"]) .dh-msg-avatar {
+  background: #f59e0b !important;
+  color: #78350f !important;
+  font-weight: 700 !important;
+}
 `;
+
