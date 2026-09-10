@@ -214,6 +214,7 @@ export class ConnectionController {
     this.#url = options.url;
     this.#publishableKey = options.publishableKey;
     this.#target = options.target;
+    this.#pendingNewSessionSubject = options.subject;
     this.#getToken = options.getToken;
     this.#schedule = options.schedule ?? systemTimers;
     this.#transportBackoff = options.transportBackoff ?? new TransportBackoffPolicy();

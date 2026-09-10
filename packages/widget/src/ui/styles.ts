@@ -2869,20 +2869,8 @@ button {
 .dh-messages-unread[hidden] { display: none; }
 
 .dh-messages-new {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: calc(var(--dh-space) * 2);
-  min-height: 44px;
-  padding: calc(var(--dh-space) * 3);
-  border-radius: 10px;
-  background: var(--dh-accent);
-  color: var(--dh-accent-text);
-  font-size: 14px;
-  font-weight: 600;
+  display: none !important;
 }
-.dh-messages-new[disabled] { opacity: 0.6; cursor: not-allowed; }
 
 /* ── New conversation (ui/new-conversation.ts) ────────────────────────────
 

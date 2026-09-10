@@ -518,6 +518,7 @@ export function createChatClient(config: ChatClientConfig): ChatClient {
     // Absent, not `undefined` — `exactOptionalPropertyTypes` makes those
     // different, and absence is what selects the support conversation.
     ...(config.target === undefined ? {} : { target: config.target }),
+    ...(config.subject === undefined ? {} : { subject: config.subject }),
     getToken: config.getToken,
     createTransport,
     onFrame: dispatchFrame,

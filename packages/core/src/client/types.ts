@@ -303,6 +303,9 @@ export interface ChatClientConfig {
    */
   readonly target?: { readonly role: string; readonly id: string };
 
+  /** Initial conversation subject / store name, if any. */
+  readonly subject?: string;
+
   /**
    * §6.1 types this `() => Promise<string>`. Widened here to `TokenProvider`
    * (connection/types.ts) — `Promise<string | AuthToken> | string | AuthToken`

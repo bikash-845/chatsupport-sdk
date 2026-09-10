@@ -1207,19 +1207,28 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
    * (reported issue 9). Rebuilt rather than patched — see
    * {@link buildHeaderAvatar} for why the slot holds several shapes.
    */
+  let activeConversationTitle: string | null = null;
+
   function syncHeaderAvatar(): void {
     const session = store.getState().session;
     let avatar: HTMLElement | null = null;
     if (!shouldCollectOffline(remote)) {
-      avatar =
-        session !== null && isHandledByCurrent(session)
-          ? // Read back through the object, never asserted — the same caution
-            // identity-header.ts documents for wire-sourced data. The brand
-            // fallback also covers a blank display name (buildAgentAvatar
-            // returns null for it).
-            (buildAgentAvatar(session.handledBy?.displayName ?? '') ??
-            buildHeaderAvatar(brandAvatar.mode, brandAvatar.initials, brandAvatar.logoUrl))
-          : buildHeaderAvatar(brandAvatar.mode, brandAvatar.initials, brandAvatar.logoUrl);
+      const activeTitle = activeConversationTitle || config.title;
+      const isCustomTitle =
+        activeTitle &&
+        activeTitle !== 'Chat with us' &&
+        activeTitle !== 'Admin Support Chat' &&
+        activeTitle !== 'Store Support & Chat' &&
+        activeTitle !== 'Dhaam AI';
+      if (isCustomTitle) {
+        avatar = buildAgentAvatar(activeTitle);
+      } else {
+        avatar =
+          session !== null && isHandledByCurrent(session)
+            ? (buildAgentAvatar(session.handledBy?.displayName ?? '') ??
+              buildHeaderAvatar(brandAvatar.mode, brandAvatar.initials, brandAvatar.logoUrl))
+            : buildHeaderAvatar(brandAvatar.mode, brandAvatar.initials, brandAvatar.logoUrl);
+      }
     }
     avatarHost.hidden = avatar === null;
     avatarHost.replaceChildren(...(avatar === null ? [] : [avatar]));
@@ -1871,8 +1880,9 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
   heroHeader.watchScroll(homeScreen.node);
 
   const messagesScreen = createMessagesScreen({
-    onOpenConversation: (sessionId) => void selectSession(sessionId),
+    onOpenConversation: (sessionId, displayName) => void selectSession(sessionId, displayName),
     onStartNew: () => openNewConversationFlow(),
+    userRole: (config as any).userRole,
   });
 
   const backButton = el('button', {
@@ -3248,11 +3258,16 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
    * superseded one, so a customer clicking two rows quickly lands on the
    * second. Guarding here would instead ignore their second click.
    */
-  async function selectSession(sessionId: string): Promise<void> {
+  async function selectSession(sessionId: string, displayName?: string): Promise<void> {
     // Asking for a different conversation ends whatever the customer had
     // open in the slot — a form abandoned on the way here must not be what
     // the picked conversation renders under.
     discardUserSurface();
+    if (displayName) {
+      activeConversationTitle = displayName;
+      identityHeader.setTitle(displayName);
+      syncHeaderAvatar();
+    }
     showConversation();
     if (open) composer.input.focus({ preventScroll: true });
 

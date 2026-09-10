@@ -188,6 +188,8 @@ export interface WidgetIdentity {
   readonly userId: string;
   /** Optional display name, used only for the local optimistic echo. */
   readonly displayName?: string;
+  /** Role of the user ('admin' | 'merchant' | 'customer'). */
+  readonly role?: string;
 
   /**
    * The LOGGED-IN user's CRM profile. Supplying it — and only supplying it —
@@ -253,6 +255,15 @@ export interface WidgetConfig {
 
   /** Header title. Defaults to `'Chat with us'`. */
   readonly title?: string;
+
+  /** Initial conversation subject / store name, if any. */
+  readonly subject?: string;
+
+  /** Target counterparty (e.g. merchant or store), if any. */
+  readonly target?: { readonly role: string; readonly id: string };
+
+  /** The current user's role in the portal ('admin' | 'merchant' | 'customer'). */
+  readonly userRole?: 'admin' | 'merchant' | 'customer' | string;
 
   /**
    * The line under the title — a response-time promise, typically. Defaults to
@@ -651,12 +662,23 @@ export function resolveConfig(config: WidgetConfig): ResolvedConfig {
   // — the sidebar tab has always shown the configured title, and a host that
   // renamed the widget once should not have to say it twice.
   const title = config.title ?? 'Chat with us';
+  const isGeneric =
+    title === 'Chat with us' ||
+    title === 'Admin Support Chat' ||
+    title === 'Store Support & Chat' ||
+    title === 'Dhaam AI';
+  const subject = config.subject ?? (!isGeneric ? title : undefined);
+  const userRole =
+    config.userRole ??
+    config.identity.role ??
+    (title === 'Admin Support Chat' ? 'admin' : (title === 'Store Support & Chat' ? 'merchant' : undefined));
 
   return {
     ...config,
     apiUrl,
     wsUrl,
     identity: { ...config.identity, userId },
+    ...(userRole !== undefined ? { userRole } : {}),
     mode: config.mode ?? 'auto',
     sheetBreakpointPx,
     side: config.side ?? 'right',
@@ -664,6 +686,7 @@ export function resolveConfig(config: WidgetConfig): ResolvedConfig {
     openOnAgentInitiated: config.openOnAgentInitiated ?? false,
     title,
     subtitle: config.subtitle ?? '',
+    ...(subject !== undefined ? { subject } : {}),
     accent: config.accent ?? '#1f2937',
     theme: config.theme ?? 'auto',
     position: config.position ?? 'bottom-right',

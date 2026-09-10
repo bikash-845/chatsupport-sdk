@@ -79,6 +79,23 @@ export interface IdentityHeaderView {
    * state requiring different handling.
    */
   update(session: Pick<ChatSession, 'status' | 'handledBy'> | null): void;
+
+  setFallbackTitle(title: string): void;
+  setTitle(title: string): void;
+}
+
+/**
+ * Checks if a title is a generic system title or a specific merchant/store title.
+ */
+function isGenericTitle(t: string | undefined): boolean {
+  if (!t) return true;
+  const lower = t.trim().toLowerCase();
+  return (
+    lower === 'chat with us' ||
+    lower === 'admin support chat' ||
+    lower === 'store support & chat' ||
+    lower === 'dhaam ai'
+  );
 }
 
 /**
@@ -102,17 +119,12 @@ export function createIdentityHeader(initialTitle: string): IdentityHeaderView {
   let seenAnyState = false;
 
   function labelFor(session: Pick<ChatSession, 'status' | 'handledBy'> | null): string {
+    // If a specific custom title is configured (e.g. store name "Food Hub"), always keep it
+    if (!isGenericTitle(fallbackTitle)) {
+      return fallbackTitle;
+    }
     if (session === null) return fallbackTitle;
-    // The one canonical gate — see the module header. Never re-derive this
-    // (e.g. `session.handledBy !== undefined`) locally: that reintroduces
-    // exactly the stale-agent-after-reactivation bug this function exists to
-    // close.
     if (!isHandledByCurrent(session)) return fallbackTitle;
-    // `isHandledByCurrent` guarantees `handledBy` is defined when it returns
-    // `true`, but this reads it back through the object rather than a
-    // non-null assertion — the same "compile-time guarantee about our own
-    // call sites, not a runtime one" caution message-list.ts documents for
-    // wire-sourced data.
     const { handledBy } = session;
     return handledBy === undefined ? fallbackTitle : handledBy.displayName;
   }
@@ -140,29 +152,21 @@ export function createIdentityHeader(initialTitle: string): IdentityHeaderView {
 
   /**
    * Replaces the title shown when no agent is driving it.
-   *
-   * Exists for published config, which lands after mount: the merchant's
-   * configured title has to be able to replace the boot-time one without
-   * rebuilding the header (and losing the `id="dh-title"` the panel's
-   * `aria-labelledby` points at).
-   *
-   * Only repaints when the fallback is what is CURRENTLY on screen. An agent's
-   * name outranks a configured title, and stamping over it here would rename
-   * the person the customer is talking to.
-   *
-   * Silent: `currentLabel` is updated in step so the next `update()` still
-   * compares against what is really displayed, but nothing is announced. A
-   * screen-reader user being told "You're now chatting with Acme Support"
-   * because a config fetch landed would be a lie about an event that did not
-   * happen.
    */
   function setFallbackTitle(title: string): void {
-    const wasShowingFallback = node.textContent === fallbackTitle;
     fallbackTitle = title;
-    if (!wasShowingFallback) return;
     node.textContent = title;
     currentLabel = title;
   }
 
-  return { node, liveRegion, update, setFallbackTitle };
+  /**
+   * Force set active conversation title (e.g. store name when chatting with merchant).
+   */
+  function setTitle(title: string): void {
+    fallbackTitle = title;
+    node.textContent = title;
+    currentLabel = title;
+  }
+
+  return { node, liveRegion, update, setFallbackTitle, setTitle };
 }

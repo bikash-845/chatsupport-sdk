@@ -98,6 +98,9 @@ export function createWidgetStore(config: ResolvedConfig): WidgetStore {
     // mislabels every optimistic echo the user sees.
     localSender: { senderId: config.identity.userId, senderType: 'CUSTOMER' },
 
+    ...(config.target === undefined ? {} : { target: config.target }),
+    ...(config.subject === undefined ? {} : { subject: config.subject }),
+
     // Identify, for a logged-in user only. A guest has a `userId` too, so
     // `profile` — and nothing else — is the discriminator.
     //
