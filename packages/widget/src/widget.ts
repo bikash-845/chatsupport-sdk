@@ -1880,7 +1880,7 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
   heroHeader.watchScroll(homeScreen.node);
 
   const messagesScreen = createMessagesScreen({
-    onOpenConversation: (sessionId, displayName) => void selectSession(sessionId, displayName),
+    onOpenConversation: (sessionId, displayName, subtitleText) => void selectSession(sessionId, displayName, subtitleText),
     onStartNew: () => openNewConversationFlow(),
     userRole: (config as any).userRole,
   });
@@ -3258,7 +3258,7 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
    * superseded one, so a customer clicking two rows quickly lands on the
    * second. Guarding here would instead ignore their second click.
    */
-  async function selectSession(sessionId: string, displayName?: string): Promise<void> {
+  async function selectSession(sessionId: string, displayName?: string, subtitleText?: string): Promise<void> {
     // Asking for a different conversation ends whatever the customer had
     // open in the slot — a form abandoned on the way here must not be what
     // the picked conversation renders under.
@@ -3267,6 +3267,10 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
       activeConversationTitle = displayName;
       identityHeader.setTitle(displayName);
       syncHeaderAvatar();
+    }
+    if (subtitleText !== undefined) {
+      subtitle = subtitleText;
+      statusText.textContent = subtitle;
     }
     showConversation();
     if (open) composer.input.focus({ preventScroll: true });

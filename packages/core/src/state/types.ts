@@ -347,6 +347,18 @@ export interface ChatSessionSummary {
    */
   subject?: string;
   topic?: string;
+  customerName?: string;
+  customerEmail?: string;
+  merchantName?: string;
+  merchantEmail?: string;
+  storeName?: string;
+  storeEmail?: string;
+  targetRole?: string;
+  targetId?: string;
+  targetName?: string;
+  targetEmail?: string;
+  adminName?: string;
+  adminEmail?: string;
 }
 
 /**

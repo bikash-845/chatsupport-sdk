@@ -19,7 +19,7 @@ export type ActiveConversationTab = 'customers' | 'merchants' | 'admin';
 
 export interface MessagesScreenCallbacks {
   /** The customer picked a row — including a terminal one, which reactivates it server-side. */
-  readonly onOpenConversation: (sessionId: string, displayName: string) => void;
+  readonly onOpenConversation: (sessionId: string, displayName: string, subtitle?: string) => void;
   /** Optional start-new callback. */
   readonly onStartNew?: () => void;
   /** Current user role in the portal ('admin' | 'merchant' | 'customer'). */
@@ -54,6 +54,7 @@ export function getRowDisplayName(
   if (isMerchantUser) {
     if (tab === 'admin' || tab === 'merchants') {
       // Merchant viewing Admin chat
+      if (s.adminName && typeof s.adminName === 'string' && s.adminName.trim()) return s.adminName.trim();
       if (s.customerName && s.customerName.toLowerCase().includes('admin')) return s.customerName.trim();
       if (s.targetName && s.targetName.toLowerCase().includes('admin')) return s.targetName.trim();
       if (s.handledBy?.displayName && s.handledBy.displayName !== 'Support Bot' && s.handledBy.displayName !== 'Dhaam Bot') {
@@ -91,6 +92,41 @@ export function getRowDisplayName(
       }
       if (s.subject && typeof s.subject === 'string' && s.subject.trim()) return s.subject.trim();
       if (s.handledBy?.displayName) return s.handledBy.displayName;
+      return 'Customer';
+    }
+  }
+}
+
+/** Resolve subtitle / email info for a conversation row and header status. */
+export function getRowSubtitle(
+  summary: ChatSessionSummary,
+  tab: ActiveConversationTab,
+  userRole?: string
+): string {
+  const s = summary as any;
+  const isMerchantUser = userRole === 'merchant';
+
+  if (isMerchantUser) {
+    if (tab === 'admin' || tab === 'merchants') {
+      // Merchant viewing Admin chat: display Admin's email
+      const email = s.adminEmail || s.targetEmail || (s.handledBy?.email) || '';
+      if (email) return `Admin • ${email}`;
+      return 'Admin Support • admin@dhaamai.com';
+    } else {
+      // Merchant viewing Customer chat: display Customer's email
+      if (s.customerEmail) return `Customer • ${s.customerEmail}`;
+      return 'Customer';
+    }
+  } else {
+    // Admin user viewing chat
+    if (tab === 'merchants' || tab === 'admin') {
+      // Admin viewing Merchant chat: display Merchant's email
+      const email = s.merchantEmail || s.storeEmail || s.targetEmail || s.customerEmail || '';
+      if (email) return `Merchant • ${email}`;
+      return 'Direct Store Chat';
+    } else {
+      // Admin viewing Customer chat: display Customer's email
+      if (s.customerEmail) return `Customer • ${s.customerEmail}`;
       return 'Customer';
     }
   }
@@ -189,7 +225,7 @@ interface MessageRow {
   ): void;
 }
 
-function createMessageRow(onSelect: (sessionId: string, displayName: string) => void): MessageRow {
+function createMessageRow(onSelect: (sessionId: string, displayName: string, subtitle?: string) => void): MessageRow {
   // Avatar circle (initial letter)
   const avatarText = el('span', { attrs: { class: 'dh-mrow-avatar-text' } });
   const avatar = el('div', { attrs: { class: 'dh-mrow-avatar' }, children: [avatarText] });
@@ -229,7 +265,8 @@ function createMessageRow(onSelect: (sessionId: string, displayName: string) => 
   button.addEventListener('click', () => {
     if (current !== null) {
       const displayName = getRowDisplayName(current, currentTab, currentUserRole);
-      onSelect(current.id, displayName);
+      const subtitle = getRowSubtitle(current, currentTab, currentUserRole);
+      onSelect(current.id, displayName, subtitle);
     }
   });
 
@@ -422,7 +459,7 @@ export function createMessagesScreen(callbacks: MessagesScreenCallbacks): Messag
         live.add(summary.id);
         let row = rows.get(summary.id);
         if (row === undefined) {
-          row = createMessageRow((sessionId, displayName) => callbacks.onOpenConversation(sessionId, displayName));
+          row = createMessageRow((sessionId, displayName, subtitle) => callbacks.onOpenConversation(sessionId, displayName, subtitle));
           rows.set(summary.id, row);
         }
         row.update(summary, summary.id === currentId, activeTab, callbacks.userRole);
