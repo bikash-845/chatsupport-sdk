@@ -281,7 +281,7 @@ const CONNECTION_COLOR: Record<ConnectionState, string> = {
  * "start a new conversation" action below the fold on a phone, which is the
  * one action every customer needs to be able to reach.
  */
-const SESSION_PICKER_LIMIT = 5;
+const SESSION_PICKER_LIMIT = 50;
 
 /** Everything the connection's state implies for the UI, decided in one place. */
 interface ConnectionStatus {
@@ -3760,9 +3760,10 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
     // elapsed (see `armGreeting`); without it this pane would appear
     // instantly and the merchant's configured wait would be invisible.
     const beforeFirstMessage = showingLog && state.messages.length === 0;
+    const isStaffOrAdmin = (config as any).userRole === 'admin' || (config as any).userRole === 'merchant';
     setPaneVisible(
       greetingBubble,
-      beforeFirstMessage && greetingDue && greetingBubble.textContent !== '',
+      !isStaffOrAdmin && beforeFirstMessage && greetingDue && greetingBubble.textContent !== '',
     );
 
     nav.update(current, state.unreadCount);

@@ -140,7 +140,7 @@ export function createMessageList(callbacks: MessageListCallbacks): MessageListV
 
   const empty = el('p', {
     attrs: { class: 'dh-empty' },
-    text: 'No messages yet. Ask us anything about your order.',
+    text: 'No messages yet.',
   });
 
   const log = el('div', {

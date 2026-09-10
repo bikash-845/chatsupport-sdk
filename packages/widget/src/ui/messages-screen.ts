@@ -60,7 +60,7 @@ export function getRowDisplayName(
       if (s.handledBy?.displayName && s.handledBy.displayName !== 'Support Bot' && s.handledBy.displayName !== 'Dhaam Bot') {
         return s.handledBy.displayName;
       }
-      return 'Dhaam Admin';
+      return 'tse';
     } else {
       // Merchant viewing Customer chat
       if (s.customerName && typeof s.customerName === 'string' && s.customerName.trim() && !s.customerName.toLowerCase().includes('admin')) {
@@ -74,21 +74,41 @@ export function getRowDisplayName(
     // Admin user
     if (tab === 'merchants' || tab === 'admin') {
       // Admin viewing Merchant chat
-      if (s.storeName && typeof s.storeName === 'string' && s.storeName.trim()) return s.storeName.trim();
-      if (s.merchantName && typeof s.merchantName === 'string' && s.merchantName.trim()) return s.merchantName.trim();
-      if (s.targetName && typeof s.targetName === 'string' && s.targetName.trim()) return s.targetName.trim();
-      if (s.subject && typeof s.subject === 'string' && s.subject.trim() && s.subject !== 'Chat with us' && s.subject !== 'Support') {
+      if (s.storeName && typeof s.storeName === 'string' && s.storeName.trim() && s.storeName.trim() !== 'Merchant') {
+        return s.storeName.trim();
+      }
+      if (s.merchantName && typeof s.merchantName === 'string' && s.merchantName.trim() && s.merchantName.trim() !== 'Merchant') {
+        return s.merchantName.trim();
+      }
+      if (s.targetName && typeof s.targetName === 'string' && s.targetName.trim() && s.targetName.trim() !== 'Merchant') {
+        return s.targetName.trim();
+      }
+      if (s.customerName && typeof s.customerName === 'string' && s.customerName.trim() &&
+          !s.customerName.toLowerCase().includes('admin')) {
+        return s.customerName.trim();
+      }
+      if (s.subject && typeof s.subject === 'string' && s.subject.trim() &&
+          s.subject !== 'Chat with us' && s.subject !== 'Support' && s.subject !== 'General inquiry') {
         return s.subject.trim();
+      }
+      if (s.merchantEmail && typeof s.merchantEmail === 'string' && s.merchantEmail.includes('@')) {
+        return s.merchantEmail.split('@')[0];
+      }
+      if (s.customerEmail && typeof s.customerEmail === 'string' && s.customerEmail.includes('@') && !s.customerEmail.toLowerCase().includes('admin')) {
+        return s.customerEmail.split('@')[0];
       }
       if (s.handledBy?.displayName && s.handledBy.displayName !== 'Support Bot' && s.handledBy.displayName !== 'Dhaam Bot') {
         return s.handledBy.displayName;
       }
-      if (s.targetId) return `Merchant #${s.targetId}`;
+      if (s.targetId) return `Merchant #${String(s.targetId).slice(0, 8)}`;
       return 'Merchant';
     } else {
       // Admin viewing Customer chat
       if (s.customerName && typeof s.customerName === 'string' && s.customerName.trim() && s.customerName !== 'Store Admin') {
         return s.customerName.trim();
+      }
+      if (s.customerEmail && typeof s.customerEmail === 'string' && s.customerEmail.includes('@')) {
+        return s.customerEmail.split('@')[0];
       }
       if (s.subject && typeof s.subject === 'string' && s.subject.trim()) return s.subject.trim();
       if (s.handledBy?.displayName) return s.handledBy.displayName;
@@ -109,9 +129,8 @@ export function getRowSubtitle(
   if (isMerchantUser) {
     if (tab === 'admin' || tab === 'merchants') {
       // Merchant viewing Admin chat: display Admin's email
-      const email = s.adminEmail || s.targetEmail || (s.handledBy?.email) || '';
-      if (email) return `Admin • ${email}`;
-      return 'Admin Support • admin@dhaamai.com';
+      const email = s.adminEmail || s.targetEmail || (s.handledBy?.email) || 'tse@gmail.com';
+      return `Admin • ${email}`;
     } else {
       // Merchant viewing Customer chat: display Customer's email
       if (s.customerEmail) return `Customer • ${s.customerEmail}`;
@@ -121,9 +140,9 @@ export function getRowSubtitle(
     // Admin user viewing chat
     if (tab === 'merchants' || tab === 'admin') {
       // Admin viewing Merchant chat: display Merchant's email
-      const email = s.merchantEmail || s.storeEmail || s.targetEmail || s.customerEmail || '';
+      const email = s.merchantEmail || s.storeEmail || (s.customerEmail && !s.customerEmail.toLowerCase().includes('admin') ? s.customerEmail : '') || s.targetEmail || '';
       if (email) return `Merchant • ${email}`;
-      return 'Direct Store Chat';
+      return 'Merchant Chat';
     } else {
       // Admin viewing Customer chat: display Customer's email
       if (s.customerEmail) return `Customer • ${s.customerEmail}`;
@@ -148,6 +167,18 @@ export function sessionBelongsToTab(
   const s = summary as any;
   const isMerchantUser = userRole === 'merchant';
 
+  // Primary: use server-provided chatType when available
+  if (s.chatType === 'merchant') {
+    return tab === 'merchants';
+  }
+  if (s.chatType === 'customer') {
+    return tab === 'customers';
+  }
+  if (s.chatType === 'admin') {
+    return isMerchantUser ? (tab === 'admin' || tab === 'merchants') : tab === 'merchants';
+  }
+
+  // Fallbacks:
   if (isMerchantUser) {
     // When Merchant is logged in:
     // Tab 1: Customers
@@ -159,10 +190,9 @@ export function sessionBelongsToTab(
       }
       return false;
     }
-    // Tab 'admin'
     if (tab === 'admin' || tab === 'merchants') {
       if (s.customerName && s.customerName.toLowerCase().includes('admin')) return true;
-      if (s.targetRole === 'merchant') return true;
+      if (s.targetRole === 'merchant' || s.targetRole === 'admin') return true;
       if (!s.targetRole && (!s.customerName || s.customerName.toLowerCase().includes('admin'))) return true;
       if (s.customerName && !s.customerName.toLowerCase().includes('admin')) return false;
       return true;
@@ -173,16 +203,16 @@ export function sessionBelongsToTab(
     // Tab 2: Merchants
     if (tab === 'customers') {
       if (s.targetRole === 'customer') return true;
-      if (s.customerName && s.customerName !== 'Store Admin' && !s.targetRole && !s.storeName && !s.merchantName) {
+      if (s.targetRole === 'merchant' || s.storeName || s.merchantName) return false;
+      if (s.customerName && !s.customerName.toLowerCase().includes('admin')) {
         return true;
       }
-      return false;
+      return !s.targetRole;
     }
     if (tab === 'merchants' || tab === 'admin') {
       if (s.targetRole === 'merchant') return true;
       if (s.storeName || s.merchantName) return true;
-      if (s.customerName && s.customerName !== 'Store Admin' && !s.targetRole) return false;
-      return true;
+      return false;
     }
   }
 
