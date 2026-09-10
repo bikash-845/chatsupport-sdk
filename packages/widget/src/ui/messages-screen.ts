@@ -175,11 +175,14 @@ export function sessionBelongsToTab(
     // For an admin viewer: correctly routed to the 'merchants' tab.
     return isMerchantUser ? (tab === 'admin' || tab === 'merchants') : tab === 'merchants';
   }
-  if (s.chatType === 'customer') {
-    return tab === 'customers';
-  }
   if (s.chatType === 'admin') {
     return isMerchantUser ? (tab === 'admin' || tab === 'merchants') : tab === 'merchants';
+  }
+  if (s.chatType === 'customer') {
+    if (!isMerchantUser && (s.storeName || s.merchantName || s.targetRole === 'merchant')) {
+      return tab === 'merchants';
+    }
+    return tab === 'customers';
   }
 
   // Fallbacks:
