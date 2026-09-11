@@ -115,12 +115,9 @@ function ctaCopy(entry: ResolvedEntry, subtitle: string): { readonly title: stri
     };
   }
   if (entry.source === 'published' && entry.primary === 'chat') {
-    return { title: 'Chat now', sub: subtitle };
+    return { title: 'Send us a message', sub: subtitle && subtitle.trim() !== '' ? subtitle : 'We usually reply instantly' };
   }
-  // Assumed, offline, or none: today's copy, byte-identical. Rows 4 and 6
-  // either keep this card's pre-chooser behaviour or never render it at all
-  // (row 6 hides the whole launcher — see `shouldMount`).
-  return { title: 'Send us a message', sub: subtitle };
+  return { title: 'Send us a message', sub: subtitle && subtitle.trim() !== '' ? subtitle : 'We usually reply instantly' };
 }
 
 /** The alt button beneath the CTA, or `null` for a row that offers none. */
@@ -225,7 +222,7 @@ export function createHomeScreen(callbacks: HomeScreenCallbacks): HomeScreenView
   // it is the same `commonQuestionsHost` the conversation screen used, moved
   // rather than duplicated.
   const questionsSlot = el('section', {
-    attrs: { class: 'dh-home-section dh-home-questions', hidden: true, 'aria-labelledby': 'dh-home-q-heading' },
+    attrs: { class: 'dh-home-section dh-home-questions', 'aria-labelledby': 'dh-home-q-heading' },
     children: [
       el('h3', {
         attrs: { class: 'dh-home-section-title', id: 'dh-home-q-heading' },
@@ -236,7 +233,7 @@ export function createHomeScreen(callbacks: HomeScreenCallbacks): HomeScreenView
 
   const node = el('div', {
     attrs: { class: 'dh-home' },
-    children: [notice, cta, alt, recentSection, questionsSlot],
+    children: [notice, cta, alt, questionsSlot, recentSection],
   });
 
   // `null` until the first `update()` — see the flip guard below, which must

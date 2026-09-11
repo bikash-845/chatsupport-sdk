@@ -199,6 +199,7 @@ export function safeImageUrl(value: string): string | null {
   const url = value.trim();
   if (url === '') return null;
   if (/^https?:\/\//i.test(url)) return url;
+  if (/^\/[a-zA-Z0-9_\-\.\/]+/i.test(url)) return url;
   if (/^data:image\/(png|jpeg|jpg|gif|webp|svg\+xml);/i.test(url)) return url;
   return null;
 }

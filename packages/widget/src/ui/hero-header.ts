@@ -131,6 +131,8 @@ export interface HeroContent {
 
 export interface HeroHeaderView {
   readonly node: HTMLElement;
+  /** Avatars displayed inside the top header row when the hero is collapsed on scroll. */
+  readonly headerAvatars: HTMLElement;
   /** Rebuilds the hero from a new appearance. Cheap; runs at most once per publish. */
   render(content: HeroContent): void;
   /**
@@ -202,6 +204,7 @@ function buildAvatarRow(faces: readonly string[], showPresence: boolean): HTMLEl
 // nothing can press.
 export function createHeroHeader(): HeroHeaderView {
   const full = el('div', { attrs: { class: 'dh-hero-full' } });
+  const headerAvatars = el('div', { attrs: { class: 'dh-header-hero-avatars', 'aria-hidden': 'true' } });
 
   // `aria-hidden` on the whole block, and this is deliberate rather than
   // careless. Every string in it is decoration that the panel already conveys:
@@ -236,6 +239,10 @@ export function createHeroHeader(): HeroHeaderView {
 
     const avatars = buildAvatarRow(faces, content.showPresence);
     if (avatars !== null) fullChildren.push(avatars);
+
+    // Also populate the compact header avatars row for collapsed state
+    const headerAvatarRow = buildAvatarRow(faces, content.showPresence);
+    headerAvatars.replaceChildren(...(headerAvatarRow !== null ? [headerAvatarRow] : []));
 
     if (content.greeting !== '') {
       fullChildren.push(el('p', { attrs: { class: 'dh-hero-greeting' }, text: content.greeting }));
@@ -342,7 +349,7 @@ export function createHeroHeader(): HeroHeaderView {
     sentinel = null;
   }
 
-  return { node, render, watchScroll, destroy };
+  return { node, headerAvatars, render, watchScroll, destroy };
 }
 
 /**

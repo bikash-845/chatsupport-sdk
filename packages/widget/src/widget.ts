@@ -789,7 +789,7 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
     (config as any).initialScreen ??
     ((config as any).target !== undefined || config.sessionId !== undefined
       ? 'conversation'
-      : 'messages');
+      : 'home');
 
   const report = (error: unknown): void => config.onError(error);
 
@@ -1966,7 +1966,10 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
               // above, which is the one place `backButton.hidden` is set.
               backButton,
               avatarHost,
-              el('div', { children: [identityHeader.node, status] }),
+              el('div', {
+                attrs: { class: 'dh-header-identity-wrap' },
+                children: [identityHeader.node, heroHeader.headerAvatars, status],
+              }),
               el('div', { attrs: { class: 'dh-header-spacer' } }),
               reconnectButton,
               headerMenu.node,
@@ -3212,7 +3215,8 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
   function syncSessionSurfaces(): void {
     if (destroyed) return;
     const state = store.getState();
-    homeScreen.update(mostRecentSession(state.pastSessions), subtitle ?? '', entry);
+    const ctaSub = remote.header.ctaSubtitle || config.header.ctaSubtitle || 'We usually reply instantly';
+    homeScreen.update(mostRecentSession(state.pastSessions), ctaSub, entry);
     messagesScreen.render(state.pastSessions, state.session?.id ?? null);
   }
 
