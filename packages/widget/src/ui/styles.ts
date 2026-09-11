@@ -3421,12 +3421,18 @@ button {
   display: none !important;
 }
 
-/* 9. Hero avatars: 3 overlapping circular team avatars with green online dot */
+/* 9. Hero avatars: 3 overlapping circular team avatars with green online dot.
+   No margin-top/bottom here — '.dh-hero-full' (rule 10 below) already gives
+   every row in this column an 8px gap; a margin on top of that gap was
+   double-spacing the row (8px gap + these margins), which is what was
+   reading as "too much gap" around the avatars. The one asymmetry Figma
+   wants — more room below the avatars than between the greeting and its
+   sub-line — is expressed as a single extra margin-bottom here, not by
+   fighting the gap on every child. */
 :host([data-screen="home"]) .dh-hero-avatars {
   display: flex !important;
   align-items: center !important;
-  margin-top: 2px !important;
-  margin-bottom: 12px !important;
+  margin-bottom: 8px !important;
 }
 :host([data-screen="home"]) .dh-hero-avatar {
   width: 38px !important;
@@ -3463,16 +3469,22 @@ button {
   font-weight: 800 !important;
   color: #ffffff !important;
   line-height: 1.2 !important;
-  margin: 0 0 6px 0 !important;
+  margin: 0 !important;
 }
 :host([data-screen="home"]) .dh-hero-sub {
   font-size: 14px !important;
   line-height: 1.45 !important;
   color: rgba(255, 255, 255, 0.92) !important;
-  margin: 0 0 12px 0 !important;
+  margin: 0 !important;
 }
+/* 'gap' (not the base 16px) is the single source of spacing between the
+   avatar row, the greeting and the sub-line — see rule 9's comment. 8px
+   matches how tight the greeting sits over its sub-line in Figma; the
+   avatar row's own margin-bottom adds the bit of extra room Figma gives
+   above the headline. */
 :host([data-screen="home"]) .dh-hero-full {
   padding: 0 18px 18px 18px !important;
+  gap: 8px !important;
 }
 
 /* 11. Home screen straddle overhang & content area */

@@ -509,12 +509,16 @@ function createCustomerMessagesScreen(callbacks: MessagesScreenCallbacks): Messa
   return {
     node,
     render(sessions, currentSessionId) {
-      allSessions = sessions;
+      // Customers only see active conversations — closed/resolved sessions drop off the list.
+      const activeSessions = sessions.filter(
+        (s) => s.status !== 'CLOSED' && s.status !== 'RESOLVED'
+      );
+      allSessions = activeSessions;
       currentId = currentSessionId;
 
       const live = new Set<string>();
       let previous: Node = empty;
-      for (const summary of sessions) {
+      for (const summary of activeSessions) {
         live.add(summary.id);
         let row = rows.get(summary.id);
         if (row === undefined) {
