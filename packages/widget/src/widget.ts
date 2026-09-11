@@ -64,7 +64,7 @@ import { createHeroHeader, heroContentFrom } from './ui/hero-header.js';
 import { createHomeScreen, homeQuestionsSlot } from './ui/home-screen.js';
 import { createIdentityHeader } from './ui/identity-header.js';
 import { createMessageList } from './ui/message-list.js';
-import { createMessagesScreen } from './ui/messages-screen.js';
+import { createMessagesScreen, getCustomerConversationTitle } from './ui/messages-screen.js';
 import { createNav } from './ui/nav.js';
 import type { NavTab } from './ui/nav.js';
 import { createNewConversationScreen } from './ui/new-conversation.js';
@@ -1219,7 +1219,9 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
         activeTitle !== 'Chat with us' &&
         activeTitle !== 'Admin Support Chat' &&
         activeTitle !== 'Store Support & Chat' &&
-        activeTitle !== 'Dhaam AI';
+        activeTitle !== 'Dhaam AI' &&
+        activeTitle !== 'Support' &&
+        activeTitle !== 'General Support';
       if (isCustomTitle) {
         avatar = buildAgentAvatar(activeTitle);
       } else {
@@ -1839,7 +1841,10 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
       // one they are not looking at reaches this widget through nothing else.
       // Bounded by a customer action, and collapsed by `refreshSessions`'s own
       // in-flight latch, so flipping between the two tabs cannot fan out.
-      if (name === 'home' || name === 'messages') refreshSessions();
+      if (name === 'home' || name === 'messages') {
+        sessionsRequested = true;
+        refreshSessions();
+      }
       if (name === 'messages') messagesScreen.focus();
       else if (name === 'home') panel.focus({ preventScroll: true });
     },
@@ -1849,7 +1854,11 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
 
   const homeScreen = createHomeScreen({
     onStartNew: () => openNewConversationFlow(),
-    onOpenConversation: (sessionId) => void selectSession(sessionId),
+    onOpenConversation: (sessionId) => {
+      const recent = store.getState().pastSessions.find((s) => s.id === sessionId);
+      const title = recent ? getCustomerConversationTitle(recent, config.title) : config.title;
+      void selectSession(sessionId, title);
+    },
     onSeeAll: () => screens.swap('messages'),
     onLeaveMessage: () => openWebform(),
     // Row 2's "Try live chat anyway": hand the visitor to a REAL,
@@ -3158,7 +3167,8 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
    * so the lists have one input rather than two that could disagree.
    */
   function refreshSessions(): void {
-    if (!sessionsRequested || destroyed) return;
+    if (destroyed) return;
+    sessionsRequested = true;
     if (sessionsInFlight) {
       sessionsRefreshQueued = true;
       return;
@@ -3267,9 +3277,11 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
     // open in the slot — a form abandoned on the way here must not be what
     // the picked conversation renders under.
     discardUserSurface();
-    if (displayName) {
-      activeConversationTitle = displayName;
-      identityHeader.setTitle(displayName);
+    const past = store.getState().pastSessions.find((s) => s.id === sessionId);
+    const resolvedTitle = displayName || (past ? getCustomerConversationTitle(past, config.title) : config.title);
+    if (resolvedTitle) {
+      activeConversationTitle = resolvedTitle;
+      identityHeader.setTitle(resolvedTitle);
       syncHeaderAvatar();
     }
     if (subtitleText !== undefined) {
@@ -4191,6 +4203,9 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
   async function startNewConversation(input: NewConversationInput, form: ProductSurface): Promise<void> {
     openingLinesInFlight += 1;
     try {
+      activeConversationTitle = config.title;
+      identityHeader.setTitle(config.title);
+      syncHeaderAvatar();
       // `startNewSession`, never `switchSession`: a switch joins a session
       // that already exists and deliberately mints nothing, so using it here
       // would drop the customer into whichever conversation the server

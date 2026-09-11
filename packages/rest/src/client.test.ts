@@ -1085,7 +1085,7 @@ describe('session summaries (listSessions)', () => {
     expect(h.calls[0]?.url.searchParams.has('limit')).toBe(false);
   });
 
-  it.each([0, 21, 1.5, -1, NaN])(
+  it.each([0, 101, 1.5, -1, NaN])(
     'rejects an out-of-range limit (%s) locally, without making a request',
     async (limit) => {
       const h = harness(() => jsonResponse(sessionSummaryPageResponse()));
@@ -1097,7 +1097,7 @@ describe('session summaries (listSessions)', () => {
     },
   );
 
-  it.each([1, 20, 5])('accepts the boundary values 1 and 20, and the default 5', async (limit) => {
+  it.each([1, 100, 50, 20, 5])('accepts the boundary values 1 and 100, and defaults', async (limit) => {
     const h = harness(() => jsonResponse(sessionSummaryPageResponse()));
 
     await createSessionSummarySource(h.client).listSessions({ limit });

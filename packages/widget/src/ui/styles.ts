@@ -3696,6 +3696,15 @@ button {
   justify-content: space-between !important;
   gap: 8px !important;
 }
+:host([data-screen="messages"]) .dh-messages-title {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: #111827 !important;
+  line-height: 1.3 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
 :host([data-screen="messages"]) .dh-messages-status {
   font-size: 12px !important;
   font-weight: 600 !important;
@@ -3705,8 +3714,16 @@ button {
   color: #4b5563 !important;
 }
 :host([data-screen="messages"]) .dh-messages-status[data-status="OPEN"] {
-  background: #f3f4f6 !important;
-  color: #374151 !important;
+  background: #dcfce7 !important;
+  color: #15803d !important;
+}
+:host([data-screen="messages"]) .dh-messages-status[data-status="WAITING_FOR_AGENT"] {
+  background: #fef3c7 !important;
+  color: #92400e !important;
+}
+:host([data-screen="messages"]) .dh-messages-status[data-status="ASSIGNED"] {
+  background: #ede9fe !important;
+  color: #6d28d9 !important;
 }
 :host([data-screen="messages"]) .dh-messages-status[data-status="CLOSED"],
 :host([data-screen="messages"]) .dh-messages-status[data-status="RESOLVED"] {

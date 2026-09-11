@@ -47,9 +47,9 @@ import type { ResolvedEntry } from '../remote-config.js';
  */
 const SHOWN_IN_RECENT: Record<ChatStatus, boolean> = {
   OPEN: true,
-  WAITING_FOR_AGENT: false,
-  ASSIGNED: false,
-  ON_HOLD: false,
+  WAITING_FOR_AGENT: true,
+  ASSIGNED: true,
+  ON_HOLD: true,
   RESOLVED: false,
   CLOSED: false,
 };
@@ -296,10 +296,13 @@ export function createHomeScreen(callbacks: HomeScreenCallbacks): HomeScreenView
       // say — would put a label on the row that the customer never wrote and
       // that nothing else in the product agrees with.
       //
-      // So the heading is WHO handled it, which is real, and the preview
-      // below carries what it was about. A row with neither still identifies
-      // itself by time.
-      recentTitle.textContent = recent.handledBy?.displayName ?? 'Conversation';
+      const s = recent as any;
+      recentTitle.textContent =
+        s.storeName?.trim() ||
+        s.merchantName?.trim() ||
+        recent.handledBy?.displayName ||
+        s.adminName?.trim() ||
+        'Support';
       // ALWAYS a pill, for every status. This used to carry a private
       // three-status table (RESOLVED/CLOSED/WAITING_FOR_AGENT) and render
       // nothing at all for OPEN, ASSIGNED and ON_HOLD — so the conversation a
@@ -309,8 +312,9 @@ export function createHomeScreen(callbacks: HomeScreenCallbacks): HomeScreenView
       // same table the Messages list reads, so the two screens cannot drift.
       recentStatus.textContent = statusPill(recent.status);
       recentStatus.setAttribute('data-status', recent.status);
-      recentPreview.textContent = recent.lastMessagePreview ?? '';
-      recentPreview.hidden = (recent.lastMessagePreview ?? '') === '';
+      const previewText = recent.lastMessagePreview || s.subject || '';
+      recentPreview.textContent = previewText;
+      recentPreview.hidden = previewText === '';
       recentTime.textContent = relativeTimeLabel(recent.lastMessageAt ?? recent.createdAt);
       recentRow.onclick = () => callbacks.onOpenConversation(recent.id);
     },

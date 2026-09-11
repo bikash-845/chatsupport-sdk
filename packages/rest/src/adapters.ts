@@ -429,10 +429,10 @@ export function createSessionActions<TSession>(client: RestClient): {
 
 /**
  * `limit`'s valid range on `GET /chat/sessions/customer` (openapi's
- * `listSessions`, `chat.validator.ts:52-58` — server default 5, cap 20).
+ * `listSessions`, `chat.validator.ts:74-78` — server default 50, cap 100).
  */
 const SESSION_SUMMARY_LIMIT_MIN = 1;
-const SESSION_SUMMARY_LIMIT_MAX = 20;
+const SESSION_SUMMARY_LIMIT_MAX = 100;
 
 /**
  * Validates `limit` before any request is made — the route itself would 400

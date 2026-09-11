@@ -66,7 +66,6 @@ export function getRowDisplayName(
       if (s.customerName && typeof s.customerName === 'string' && s.customerName.trim() && !s.customerName.toLowerCase().includes('admin')) {
         return s.customerName.trim();
       }
-      if (s.subject && typeof s.subject === 'string' && s.subject.trim()) return s.subject.trim();
       if (s.handledBy?.displayName) return s.handledBy.displayName;
       return 'Customer';
     }
@@ -87,10 +86,6 @@ export function getRowDisplayName(
           !s.customerName.toLowerCase().includes('admin')) {
         return s.customerName.trim();
       }
-      if (s.subject && typeof s.subject === 'string' && s.subject.trim() &&
-          s.subject !== 'Chat with us' && s.subject !== 'Support' && s.subject !== 'General inquiry') {
-        return s.subject.trim();
-      }
       if (s.merchantEmail && typeof s.merchantEmail === 'string' && s.merchantEmail.includes('@')) {
         return s.merchantEmail.split('@')[0];
       }
@@ -110,7 +105,6 @@ export function getRowDisplayName(
       if (s.customerEmail && typeof s.customerEmail === 'string' && s.customerEmail.includes('@')) {
         return s.customerEmail.split('@')[0];
       }
-      if (s.subject && typeof s.subject === 'string' && s.subject.trim()) return s.subject.trim();
       if (s.handledBy?.displayName) return s.handledBy.displayName;
       return 'Customer';
     }
@@ -352,28 +346,59 @@ function createMessageRow(onSelect: (sessionId: string, displayName: string, sub
   };
 }
 
+/**
+ * Resolves the name of the entity the customer is chatting with:
+ * Store name, Merchant name, assigned Agent name, or Support.
+ * NEVER returns the user's message/subject.
+ */
+export function getCustomerConversationTitle(summary: ChatSessionSummary, fallbackTitle = 'Support'): string {
+  const s = summary as any;
+  if (s.storeName && typeof s.storeName === 'string' && s.storeName.trim() && s.storeName.trim() !== 'General Support') {
+    return s.storeName.trim();
+  }
+  if (s.merchantName && typeof s.merchantName === 'string' && s.merchantName.trim() && s.merchantName.trim() !== 'Merchant') {
+    return s.merchantName.trim();
+  }
+  if (s.targetName && typeof s.targetName === 'string' && s.targetName.trim() && s.targetName.trim() !== 'Merchant') {
+    return s.targetName.trim();
+  }
+  if (s.handledBy?.displayName && typeof s.handledBy.displayName === 'string' && s.handledBy.displayName.trim() && s.handledBy.displayName !== 'Support Bot') {
+    return s.handledBy.displayName.trim();
+  }
+  if (s.adminName && typeof s.adminName === 'string' && s.adminName.trim() && s.adminName.trim() !== 'Admin') {
+    return s.adminName.trim();
+  }
+  return fallbackTitle;
+}
+
 interface CustomerMessageRow {
   readonly node: HTMLLIElement;
   update(summary: ChatSessionSummary, isCurrent: boolean): void;
 }
 
-function createCustomerMessageRow(onSelect: (sessionId: string) => void): CustomerMessageRow {
+function createCustomerMessageRow(
+  onSelect: (sessionId: string, displayName?: string, subtitle?: string) => void,
+): CustomerMessageRow {
   const status = el('span', { attrs: { class: 'dh-messages-status' } });
   const time = el('time', { attrs: { class: 'dh-messages-time' } });
   const top = el('div', { attrs: { class: 'dh-messages-row-top' }, children: [status, time] });
 
+  const title = el('span', { attrs: { class: 'dh-messages-title' } });
   const preview = el('span', { attrs: { class: 'dh-messages-preview', hidden: true } });
   const unread = el('span', { attrs: { class: 'dh-messages-unread', hidden: true } });
 
   const button = el('button', {
     attrs: { class: 'dh-messages-row', type: 'button' },
-    children: [top, preview, unread],
+    children: [top, title, preview, unread],
   });
   const node = el('li', { attrs: { class: 'dh-messages-item' }, children: [button] });
 
   let current: ChatSessionSummary | null = null;
   button.addEventListener('click', () => {
-    if (current !== null) onSelect(current.id);
+    if (current !== null) {
+      const titleText = getCustomerConversationTitle(current);
+      onSelect(current.id, titleText);
+    }
   });
 
   return {
@@ -384,26 +409,34 @@ function createCustomerMessageRow(onSelect: (sessionId: string) => void): Custom
       if (isCurrent) button.setAttribute('aria-current', 'true');
       else button.removeAttribute('aria-current');
 
-      status.textContent = statusLabel(summary.status);
+      status.textContent = pillLabel(summary.status);
       status.setAttribute('data-status', summary.status);
 
       const whenIso = summary.lastMessageAt ?? summary.createdAt;
       if (time.getAttribute('datetime') !== whenIso) time.setAttribute('datetime', whenIso);
       time.textContent = relativeTimeLabel(whenIso);
 
-      const hasPreview = summary.lastMessagePreview !== undefined && summary.lastMessagePreview !== '';
-      preview.textContent = hasPreview ? (summary.lastMessagePreview as string) : '';
+      const displayName = getCustomerConversationTitle(summary);
+      title.textContent = displayName;
+
+      const previewContent = (summary.lastMessagePreview && summary.lastMessagePreview !== '')
+        ? summary.lastMessagePreview
+        : (summary.subject && summary.subject !== '')
+        ? summary.subject
+        : '';
+      const hasPreview = previewContent !== '';
+      preview.textContent = hasPreview ? previewContent : '';
       preview.hidden = !hasPreview;
 
       const hasUnread = summary.unreadCount > 0;
       unread.textContent = hasUnread ? (summary.unreadCount > 99 ? '99+' : String(summary.unreadCount)) : '';
       unread.hidden = !hasUnread;
 
-      const parts = [statusLabel(summary.status)];
+      const parts = [displayName, statusLabel(summary.status)];
       if (isCurrent) parts.push('current conversation');
       const relative = relativeTimeLabel(whenIso);
       if (relative !== '') parts.push(relative);
-      if (hasPreview) parts.push(summary.lastMessagePreview as string);
+      if (hasPreview) parts.push(previewContent);
       if (hasUnread) {
         parts.push(`${summary.unreadCount} unread ${summary.unreadCount === 1 ? 'message' : 'messages'}`);
       }
@@ -453,12 +486,12 @@ function createCustomerMessagesScreen(callbacks: MessagesScreenCallbacks): Messa
   function applyFilter(): void {
     const query = searchInput.value.trim().toLowerCase();
     let anyVisible = false;
-
     for (const summary of allSessions) {
       const row = rows.get(summary.id);
       if (row === undefined) continue;
 
-      const haystack = `${statusLabel(summary.status)} ${summary.lastMessagePreview ?? ''}`.toLowerCase();
+      const titleName = getCustomerConversationTitle(summary);
+      const haystack = `${titleName} ${statusLabel(summary.status)} ${summary.lastMessagePreview ?? ''} ${summary.subject ?? ''}`.toLowerCase();
       const matches = query === '' || haystack.includes(query);
       row.node.hidden = !matches;
       if (matches) anyVisible = true;
@@ -485,7 +518,9 @@ function createCustomerMessagesScreen(callbacks: MessagesScreenCallbacks): Messa
         live.add(summary.id);
         let row = rows.get(summary.id);
         if (row === undefined) {
-          row = createCustomerMessageRow((sessionId) => callbacks.onOpenConversation(sessionId));
+          row = createCustomerMessageRow((sessionId, displayName, subtitle) =>
+            callbacks.onOpenConversation(sessionId, displayName ?? 'Support', subtitle)
+          );
           rows.set(summary.id, row);
         }
         row.update(summary, summary.id === currentId);
