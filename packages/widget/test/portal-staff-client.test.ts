@@ -81,6 +81,31 @@ describe('listPortalQueue — GET /agent/queue row parsing', () => {
     ]);
   });
 
+  it('maps the live /agent/queue endpoint\'s numeric status code to the SDK\'s string name', async () => {
+    // The real endpoint leaks chat-service's raw ChatStatus DB integer
+    // (enums.ts: OPEN=1, WAITING_FOR_AGENT=2, ASSIGNED=3, CLOSED=4,
+    // RESOLVED=5, ON_HOLD=6) rather than the canonical string name — see
+    // readQueueStatus's own comment for why leaving this unmapped crashes
+    // ui/session-status.ts's SESSION_STATUS_WORDS lookup on every row.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse({ data: [{ id: 'sess_3', status: 3 }] })),
+    );
+
+    const rows = await listPortalQueue(OPTIONS);
+    expect(rows[0]?.status).toBe('ASSIGNED');
+  });
+
+  it('falls back to OPEN for a status code/name it does not recognize', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse({ data: [{ id: 'sess_4', status: 99 }] })),
+    );
+
+    const rows = await listPortalQueue(OPTIONS);
+    expect(rows[0]?.status).toBe('OPEN');
+  });
+
   it('treats a non-array "data" as an empty queue rather than crashing', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ data: null })));
     const rows = await listPortalQueue(OPTIONS);

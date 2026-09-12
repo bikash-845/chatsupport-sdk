@@ -35,7 +35,7 @@
 
 import { projectHistoryRow, unwrapEnvelope } from '@dhaam-ccrm/rest';
 import type { RestChatMessage } from '@dhaam-ccrm/rest';
-import { createConversationClient } from '@dhaam-ccrm/core';
+import { createConversationClient, isChatStatus } from '@dhaam-ccrm/core';
 import type { ChatMessage, ConversationClient, MessageHistorySource } from '@dhaam-ccrm/core';
 
 export interface PortalStaffOptions {
@@ -138,6 +138,36 @@ export interface PortalQueueRow {
   readonly lastMessage: string | null;
 }
 
+// `/agent/queue` is a REST endpoint, not the v2 WS protocol §12.1 talks about
+// above — it leaks chat-service's raw DB integer (`ChatStatus.OPEN = 1`, …)
+// rather than the canonical string name the rest of this SDK deals in
+// exclusively. Widening a string-typed field to `1 | '1'` at the type level
+// gets this wrong just as badly as ignoring it: `ui/session-status.ts`'s
+// `SESSION_STATUS_WORDS[status]` is a plain object keyed by the six string
+// names, so an unmapped numeric code (or its naive `String(...)`, `'1'`)
+// looks up as `undefined` and throws reading `.label` off it — a live crash
+// on every row this endpoint returns, not a cosmetic wrong label.
+// chat-service-node's `ChatStatus` enum (shared/constants/enums.ts) — the DB
+// integer this REST endpoint leaks. Not exported anywhere this SDK can import
+// it from, so mirrored here; `isChatStatus` (from @dhaam-ccrm/core) covers
+// the "already a valid name" half instead of a second copy of that list.
+const QUEUE_STATUS_BY_CODE: Record<number, string> = {
+  1: 'OPEN',
+  2: 'WAITING_FOR_AGENT',
+  3: 'ASSIGNED',
+  4: 'CLOSED',
+  5: 'RESOLVED',
+  6: 'ON_HOLD',
+};
+
+function readQueueStatus(value: unknown): string {
+  if (typeof value === 'string' && isChatStatus(value)) return value;
+  if (typeof value === 'number' && value in QUEUE_STATUS_BY_CODE) return QUEUE_STATUS_BY_CODE[value] as string;
+  // Neither a known name nor a known code — 'OPEN' rather than the crash
+  // above, matching `widget.ts`'s own `?? 'OPEN'` fallback for a missing one.
+  return 'OPEN';
+}
+
 function readQueueRow(row: unknown): PortalQueueRow | null {
   if (typeof row !== 'object' || row === null) return null;
   const source = row as Record<string, unknown>;
@@ -158,7 +188,7 @@ function readQueueRow(row: unknown): PortalQueueRow | null {
 
   return {
     sessionId,
-    status: typeof source['status'] === 'string' ? (source['status'] as string) : String(source['status'] ?? '?'),
+    status: readQueueStatus(source['status']),
     customerName,
     lastMessage: lastContent,
   };
