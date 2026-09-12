@@ -32,7 +32,7 @@
 // exists, which no z-index can outrank, and falls back to the real maximum
 // (2147483647) rather than v1's arbitrary six digits.
 
-import { DEFAULT_LOGO_IMAGE, safeImageUrl } from './dom.js';
+import { safeImageUrl } from './dom.js';
 
 import type {
   HeaderAppearance,
@@ -3306,7 +3306,7 @@ button {
   display: block !important;
   width: 95px !important;
   height: 38px !important;
-  background: url("${DEFAULT_LOGO_IMAGE}") no-repeat left center !important;
+  background: url('/assets/chat/default-logo.svg') no-repeat left center !important;
   background-size: contain !important;
   font-size: 0 !important;
   color: transparent !important;
