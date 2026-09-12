@@ -99,7 +99,10 @@ console.log('');
 // a budget, it is a formality, and it would have let the whole saving be
 // spent again without anyone being told.
 // Increased slightly to accommodate Figma redesign styles and customer/portal screen separation
-const WIDGET_GZIP_BUDGET = 86_016;
+// Increased again for the Dhaam AI wordmark (DEFAULT_LOGO_IMAGE, ui/dom.ts) — an inline SVG fallback
+// shown in place of a tenant logo/avatar that 404s, at 2.3 KB gzip after rounding its path data to
+// integer precision (was 9.7 KB at the original Figma export's 4-decimal precision).
+const WIDGET_GZIP_BUDGET = 88_064;
 if (gzipped.length > WIDGET_GZIP_BUDGET) {
   console.error(
     `  ERROR: dist/widget.js is ${fmt(gzipped.length)} gzip, over the ${fmt(WIDGET_GZIP_BUDGET)} budget.`,

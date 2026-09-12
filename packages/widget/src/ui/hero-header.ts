@@ -117,7 +117,24 @@
 
 import type { HeaderAppearance } from '../config.js';
 
-import { el, safeImageUrl } from './dom.js';
+import { DEFAULT_AVATAR_IMAGE, DEFAULT_LOGO_IMAGE, el, safeImageUrl } from './dom.js';
+
+/**
+ * A logo/avatar `<img>` that swaps to `fallback` instead of sitting as a
+ * broken-image glyph when the browser cannot actually load `src` — see
+ * DEFAULT_AVATAR_IMAGE/DEFAULT_LOGO_IMAGE's own docs in dom.ts for why this
+ * can happen even though `src` already passed `safeImageUrl`. Callers pass
+ * the agent silhouette for a person's photo and the Dhaam AI wordmark for a
+ * brand logo — the two 404 cases read very differently.
+ */
+function imgWithFallback(
+  attrs: Record<string, string | number | boolean | null | undefined>,
+  fallback: string = DEFAULT_AVATAR_IMAGE,
+): HTMLImageElement {
+  const img = el('img', { attrs });
+  img.addEventListener('error', () => { img.src = fallback; }, { once: true });
+  return img;
+}
 
 export interface HeroContent {
   readonly showLogo: boolean;
@@ -186,7 +203,7 @@ function buildAvatarRow(faces: readonly string[], showPresence: boolean): HTMLEl
       el('span', {
         attrs: { class: 'dh-hero-avatar' },
         children: [
-          el('img', { attrs: { src, alt: '' } }),
+          imgWithFallback({ src, alt: '' }),
           // The presence dot rides the LAST face only — it says "someone
           // is here", not "this particular person is", so one is the
           // honest number regardless of how many faces are shown.
@@ -234,7 +251,7 @@ export function createHeroHeader(): HeroHeaderView {
     const fullChildren: Node[] = [];
 
     if (logo !== null) {
-      fullChildren.push(el('img', { attrs: { class: 'dh-hero-logo', src: logo, alt: '' } }));
+      fullChildren.push(imgWithFallback({ class: 'dh-hero-logo', src: logo, alt: '' }, DEFAULT_LOGO_IMAGE));
     }
 
     const avatars = buildAvatarRow(faces, content.showPresence);

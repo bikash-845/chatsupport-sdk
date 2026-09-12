@@ -558,8 +558,14 @@ function createPortalMessagesScreen(callbacks: MessagesScreenCallbacks): Message
   const secondTabLabel = isMerchantUser ? 'Admin' : 'Merchants';
 
   // ── Tab bar: Customers | [Merchants / Admin] ────────────────────────────
+  //
+  // Neither tab starts with `--active`/`aria-selected="true"` baked into its
+  // markup any more — `switchTab()` (called once at the bottom of this
+  // function, with the real default) is now the ONLY place that sets those
+  // classes, so the visible active tab and the `activeTab` state driving
+  // `applyFilter()` can never start out of sync with each other.
   const customersCountBadge = el('span', { attrs: { class: 'dh-mtab-count' }, text: '0' });
-  const secondTabCountBadge = el('span', { attrs: { class: 'dh-mtab-count dh-mtab-count--active' }, text: '0' });
+  const secondTabCountBadge = el('span', { attrs: { class: 'dh-mtab-count' }, text: '0' });
 
   const customersTab = el('button', {
     attrs: { class: 'dh-mtab', type: 'button', 'aria-selected': 'false', role: 'tab' },
@@ -570,7 +576,7 @@ function createPortalMessagesScreen(callbacks: MessagesScreenCallbacks): Message
     on: { click: () => switchTab('customers') },
   });
   const secondTab = el('button', {
-    attrs: { class: 'dh-mtab dh-mtab--active', type: 'button', 'aria-selected': 'true', role: 'tab' },
+    attrs: { class: 'dh-mtab', type: 'button', 'aria-selected': 'false', role: 'tab' },
     children: [
       el('span', { text: secondTabLabel }),
       secondTabCountBadge,
@@ -614,7 +620,14 @@ function createPortalMessagesScreen(callbacks: MessagesScreenCallbacks): Message
   const rows = new Map<string, MessageRow>();
   let allSessions: readonly ChatSessionSummary[] = [];
   let currentId: string | null = null;
-  let activeTab: ActiveConversationTab = secondTabKey;
+  // Merchant viewers keep their prior default (their own second tab —
+  // 'admin' — is the real, working conversation). Admin viewers default
+  // straight to 'customers': it is the tab with real data (see widget.ts's
+  // portal wiring); 'merchants' is not wired to anything for an admin
+  // viewer, so opening there first showed an always-empty tab ahead of the
+  // one that actually works.
+  const initialTab: ActiveConversationTab = isMerchantUser ? secondTabKey : 'customers';
+  let activeTab: ActiveConversationTab = initialTab;
 
   function switchTab(tab: ActiveConversationTab): void {
     activeTab = tab;
@@ -640,23 +653,39 @@ function createPortalMessagesScreen(callbacks: MessagesScreenCallbacks): Message
     const query = searchInput.value.trim().toLowerCase();
     let anyVisible = false;
     let totalInTab = 0;
+    let customerCount = 0;
+    let secondTabCount = 0;
 
     for (const summary of allSessions) {
+      // Every count below — the two tab badges and `totalInTab` (which
+      // decides the empty-state text) — comes from this ONE pass over
+      // `allSessions`, so none of them can disagree with each other. The
+      // previous code counted the badges separately in `render()` and
+      // gated `totalInTab` on `rows.get(...)` existing here, which let the
+      // badge say "88" while this said "No conversations yet." whenever a
+      // row had not been created yet.
+      if (sessionBelongsToTab(summary, 'customers', callbacks.userRole)) customerCount++;
+      if (sessionBelongsToTab(summary, secondTabKey, callbacks.userRole)) secondTabCount++;
+
+      const inTab = sessionBelongsToTab(summary, activeTab, callbacks.userRole);
+      if (inTab) totalInTab++;
+
       const row = rows.get(summary.id);
       if (row === undefined) continue;
 
-      const inTab = sessionBelongsToTab(summary, activeTab, callbacks.userRole);
       if (!inTab) {
         row.node.hidden = true;
         continue;
       }
-      totalInTab++;
       row.update(summary, summary.id === currentId, activeTab, callbacks.userRole);
 
       const matches = matchesQuery(summary, query, activeTab, callbacks.userRole);
       row.node.hidden = !matches;
       if (matches) anyVisible = true;
     }
+
+    secondTabCountBadge.textContent = String(secondTabCount);
+    customersCountBadge.textContent = String(customerCount);
 
     if (totalInTab === 0) {
       if (activeTab === 'customers') {
@@ -673,21 +702,16 @@ function createPortalMessagesScreen(callbacks: MessagesScreenCallbacks): Message
     }
   }
 
+  // Applies `initialTab`'s classes/aria-selected to the tab bar — see the
+  // comment on the (now class-less) markup above for why this is the only
+  // place those get set.
+  switchTab(initialTab);
+
   return {
     node,
     render(sessions, currentSessionId) {
       allSessions = sessions;
       currentId = currentSessionId;
-
-      // Update tab counts
-      let secondTabCount = 0;
-      let customerCount = 0;
-      for (const s of sessions) {
-        if (sessionBelongsToTab(s, secondTabKey, callbacks.userRole)) secondTabCount++;
-        if (sessionBelongsToTab(s, 'customers', callbacks.userRole)) customerCount++;
-      }
-      secondTabCountBadge.textContent = String(secondTabCount);
-      customersCountBadge.textContent = String(customerCount);
 
       const live = new Set<string>();
       let previous: Node = empty;

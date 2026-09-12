@@ -49,6 +49,8 @@ import { createReportIssueForm } from './ui/report-issue.js';
 import type { IssueReport } from './ui/report-issue.js';
 import { createComposer } from './ui/composer.js';
 import {
+  DEFAULT_AVATAR_IMAGE,
+  DEFAULT_LOGO_IMAGE,
   ICONS,
   LAUNCHER_ICONS,
   SOLID_LAUNCHER_ICONS,
@@ -401,7 +403,14 @@ function buildLauncherIcon(spec: LauncherIcon): Node {
     // `alt=""`, not the label: the launcher already carries an accessible name
     // (see `launcherName`), and naming the image too would make a screen
     // reader announce the button twice — the same rule `icon()` follows.
-    if (src !== null) return el('img', { attrs: { class: 'dh-launcher-image', src, alt: '' } });
+    if (src !== null) {
+      const img = el('img', { attrs: { class: 'dh-launcher-image', src, alt: '' } });
+      // Same gap as the header avatar and hero logo/faces: `src` passed the
+      // allowlist but the browser can still fail to fetch it — see
+      // DEFAULT_LOGO_IMAGE's doc in dom.ts.
+      img.addEventListener('error', () => { img.src = DEFAULT_LOGO_IMAGE; }, { once: true });
+      return img;
+    }
   }
 
   // `solidIcon` for the console's own glyphs, which are Heroicons SOLID
@@ -430,9 +439,17 @@ function buildLauncherIcon(spec: LauncherIcon): Node {
 function buildHeaderAvatar(mode: AvatarMode, initials: string, logoUrl: string): HTMLElement | null {
   if (mode === 'logo') {
     const src = safeImageUrl(logoUrl);
-    return src === null
-      ? null
-      : el('img', { attrs: { class: 'dh-avatar dh-avatar-image', src, alt: '', 'aria-hidden': 'true' } });
+    if (src === null) return null;
+    const img = el('img', {
+      attrs: { class: 'dh-avatar dh-avatar-image', src, alt: '', 'aria-hidden': 'true' },
+    });
+    // A configured logo the BROWSER cannot actually load (relative path
+    // resolved against the wrong origin, deleted asset) must not sit here
+    // as a broken-image glyph — see DEFAULT_LOGO_IMAGE's own doc in
+    // dom.ts. `{ once: true }`: the fallback itself never fails, so there
+    // is nothing left to listen for after the first error.
+    img.addEventListener('error', () => { img.src = DEFAULT_LOGO_IMAGE; }, { once: true });
+    return img;
   }
 
   // Two characters, because that is what fits: the console lets a merchant
@@ -3379,13 +3396,16 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
     const ctaSub = remote.header.ctaSubtitle || config.header.ctaSubtitle || 'We usually reply instantly';
     homeScreen.update(mostRecentSession(state.pastSessions), ctaSub, entry);
     // Portal (admin) mode: the Customers tab's real rows come from
-    // `/agent/queue`, not from this identity's own `pastSessions` (which for
-    // an admin is an empty, irrelevant list — see the comment above
-    // `isPortalAdmin`). Prepended, not swapped: `state.pastSessions` is left
-    // exactly as before for every other `userRole`.
-    const sessions = isPortalAdmin
-      ? [...portalQueueRows.map(portalQueueRowToSummary), ...state.pastSessions]
-      : state.pastSessions;
+    // `/agent/queue`, not from `state.pastSessions` — that array is the
+    // customer-flow client's OWN session history (the widget always builds
+    // one, unused for portal rendering — see the comment above
+    // `isPortalAdmin`), and it is NOT empty for an admin identity that has
+    // ever had one: it is a leftover, irrelevant thread from before this
+    // widget had a real Customers tab, and mixing it in was inflating the
+    // Merchants tab's count with sessions that are neither real merchant
+    // conversations nor anything an admin can act on here. Swapped, not
+    // merged, for admin; every other `userRole` is unaffected.
+    const sessions = isPortalAdmin ? portalQueueRows.map(portalQueueRowToSummary) : state.pastSessions;
     messagesScreen.render(sessions, currentPortalSessionId ?? state.session?.id ?? null);
   }
 
