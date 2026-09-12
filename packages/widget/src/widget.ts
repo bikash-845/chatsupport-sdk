@@ -2025,6 +2025,7 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
     const resolvedTitle = displayName ?? 'Customer';
     activeConversationTitle = resolvedTitle;
     identityHeader.setTitle(resolvedTitle);
+    syncHeaderAvatar();
     subtitle = 'Customer';
     statusText.textContent = subtitle;
     portalThread.setError(null);

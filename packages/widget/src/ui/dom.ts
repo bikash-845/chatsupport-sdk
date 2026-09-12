@@ -219,15 +219,10 @@ export function safeImageUrl(value: string): string | null {
  * transient network blip does not retry into a loop against a URL that is
  * never coming back.
  */
-export const DEFAULT_AVATAR_IMAGE: string =
-  'data:image/svg+xml,' +
-  encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">' +
-      '<circle cx="20" cy="20" r="20" fill="#E5E7EB"/>' +
-      '<circle cx="20" cy="16" r="7" fill="#9CA3AF"/>' +
-      '<path d="M6 35c1.6-8.4 7.9-13 14-13s12.4 4.6 14 13" fill="#9CA3AF"/>' +
-      '</svg>',
-  );
+import { AGENT_1_IMAGE, DEFAULT_AGENT_AVATARS } from './agent-avatars.js';
+export { DEFAULT_AGENT_AVATARS };
+
+export const DEFAULT_AVATAR_IMAGE: string = AGENT_1_IMAGE;
 
 /**
  * The Dhaam AI wordmark, used as the fallback in place of {@link
