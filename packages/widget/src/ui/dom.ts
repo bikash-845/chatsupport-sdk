@@ -233,7 +233,7 @@ export const DEFAULT_AVATAR_IMAGE: string = AGENT_1_IMAGE;
  * `fill="white"` throughout, same as the source asset: only safe to place on
  * the widget's own colored surfaces (header/launcher/hero backgrounds).
  */
-export const DEFAULT_LOGO_IMAGE: string = '/assets/chat/default-logo.svg';
+export { DEFAULT_LOGO_IMAGE } from './default-logo-data.js';
 
 /**
  * The same allowlist for a value going into an `href`, where the stakes are
