@@ -65,6 +65,14 @@ import { createHomeScreen, homeQuestionsSlot } from './ui/home-screen.js';
 import { createIdentityHeader } from './ui/identity-header.js';
 import { createMessageList } from './ui/message-list.js';
 import { createMessagesScreen, getCustomerConversationTitle } from './ui/messages-screen.js';
+import { createPortalThread } from './ui/portal-thread.js';
+import {
+  createPortalConversationClient,
+  listPortalQueue,
+  PortalApiError,
+} from './portal/portal-staff-client.js';
+import type { PortalQueueRow } from './portal/portal-staff-client.js';
+import type { ConversationClient } from '@dhaam-ccrm/core';
 import { createNav } from './ui/nav.js';
 import type { NavTab } from './ui/nav.js';
 import { createNewConversationScreen } from './ui/new-conversation.js';
@@ -1818,6 +1826,15 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
       // open in its surface slot — see `discardUserSurface` for why nothing
       // else would ever clear it.
       if (name !== 'conversation') discardUserSurface();
+      // Same rule for the portal thread: leaving 'conversation' means
+      // whichever customer conversation was open is no longer on screen, so
+      // a later re-render of a STALE `client.subscribe` notification (one
+      // that arrives after the admin has already navigated away) must not
+      // repaint a thread nobody is looking at.
+      if (name !== 'conversation') {
+        currentPortalSessionId = null;
+        portalConversationActive = false;
+      }
       syncScreens();
       // Focus follows navigation, same as any single-page app's route
       // change — but only while the panel is actually open and visible;
@@ -1845,6 +1862,7 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
         sessionsRequested = true;
         refreshSessions();
       }
+      if (name === 'messages') refreshPortalQueue();
       if (name === 'messages') messagesScreen.focus();
       else if (name === 'home') panel.focus({ preventScroll: true });
     },
@@ -1889,10 +1907,134 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
   heroHeader.watchScroll(homeScreen.node);
 
   const messagesScreen = createMessagesScreen({
-    onOpenConversation: (sessionId, displayName, subtitleText) => void selectSession(sessionId, displayName, subtitleText),
+    onOpenConversation: (sessionId, displayName, subtitleText) => {
+      if (portalQueueIds.has(sessionId)) {
+        void openPortalConversation(sessionId, displayName);
+      } else {
+        void selectSession(sessionId, displayName, subtitleText);
+      }
+    },
     onStartNew: () => openNewConversationFlow(),
     userRole: (config as any).userRole,
   });
+
+  // ── Portal (admin) mode: the Customers tab's real data source ───────────
+  //
+  // Only for `userRole === 'admin'` — chat-service's staff socket refuses a
+  // merchant/manager token outright (a mapping gap on the server, not
+  // something this widget can route around), so `userRole === 'merchant'`
+  // is deliberately left exactly as before: an empty Customers/Merchants
+  // tab, same as prior to this change.
+  //
+  // A second client, independent of `store` above — see
+  // `./portal/portal-staff-client.ts`'s header for why the two protocols
+  // cannot share a session model. `store`'s own connection still opens (line
+  // near the bottom of this function) and is simply unused for portal
+  // rendering; nothing about the customer flow changes for `userRole`
+  // undefined/'customer'/'merchant'.
+  const isPortalAdmin = (config as any).userRole === 'admin' && config.auth.getToken !== undefined;
+
+  async function portalToken(): Promise<string> {
+    const resolved = await config.auth.getToken!();
+    return typeof resolved === 'string' ? resolved : resolved.accessToken;
+  }
+
+  let portalClient: ConversationClient | null = null;
+  let portalUnsubscribe: (() => void) | null = null;
+  let portalQueueRows: readonly PortalQueueRow[] = [];
+  const portalQueueIds = new Set<string>();
+  let portalQueuePollTimer: ReturnType<typeof setInterval> | null = null;
+  let currentPortalSessionId: string | null = null;
+
+  function ensurePortalClient(): ConversationClient {
+    if (portalClient !== null) return portalClient;
+    const client = createPortalConversationClient({
+      apiUrl: config.apiUrl,
+      wsUrl: config.wsUrl,
+      getToken: portalToken,
+      senderId: config.identity.userId,
+    });
+    portalClient = client;
+    portalUnsubscribe = client.subscribe((state) => {
+      if (currentPortalSessionId === null) return;
+      portalThread.render(state.conversations[currentPortalSessionId] ?? null, false);
+    });
+    client.connect().catch(report);
+    return client;
+  }
+
+  /** GET /agent/queue — this tenant's real customer conversations. REST, not the socket; works before/independent of `ensurePortalClient()`. */
+  function refreshPortalQueue(): void {
+    if (!isPortalAdmin || destroyed) return;
+    listPortalQueue({ apiUrl: config.apiUrl, wsUrl: config.wsUrl, getToken: portalToken, senderId: config.identity.userId })
+      .then((rows) => {
+        if (destroyed) return;
+        portalQueueRows = rows;
+        portalQueueIds.clear();
+        for (const row of rows) portalQueueIds.add(row.sessionId);
+        syncSessionSurfaces();
+      })
+      .catch((error: unknown) => {
+        // A failed queue refresh leaves the last-known list on screen rather
+        // than blanking it — same "don't discard what's still true" rule
+        // `refreshSessions` follows for the customer flow.
+        report(error instanceof PortalApiError ? new Error(`could not load the customer queue: ${error.message}`) : error);
+      });
+  }
+
+  /** Maps one real queue row onto the shape `ui/messages-screen.ts`'s portal tab already reads defensively (`chatType`/`customerName`/etc. — see `projection.ts`'s own comment on those enrichment fields). */
+  function portalQueueRowToSummary(row: PortalQueueRow): ChatSessionSummary {
+    return {
+      id: row.sessionId,
+      status: (row.status as ChatSessionSummary['status']) ?? 'OPEN',
+      mode: 'HUMAN',
+      createdAt: new Date().toISOString(),
+      closedAt: null,
+      lastMessageAt: undefined,
+      lastMessagePreview: row.lastMessage ?? undefined,
+      unreadCount: 0,
+      handledBy: null,
+      // Consumed by messages-screen.ts's tab-routing/display-name logic —
+      // see this file's own comment above `portalQueueIds` for why these are
+      // the only fields that need to be real for the Customers tab to work.
+      chatType: 'customer',
+      customerName: row.customerName ?? undefined,
+    } as unknown as ChatSessionSummary;
+  }
+
+  async function openPortalConversation(sessionId: string, displayName?: string): Promise<void> {
+    currentPortalSessionId = sessionId;
+    portalConversationActive = true;
+    const resolvedTitle = displayName ?? 'Customer';
+    activeConversationTitle = resolvedTitle;
+    identityHeader.setTitle(resolvedTitle);
+    subtitle = 'Customer';
+    statusText.textContent = subtitle;
+    portalThread.setError(null);
+    portalThread.render(null, true);
+    showConversation();
+    portalThread.focus();
+
+    const client = ensurePortalClient();
+    try {
+      await client.open({ conversationId: sessionId });
+      if (currentPortalSessionId === sessionId) {
+        portalThread.render(client.getState().conversations[sessionId] ?? null, false);
+      }
+    } catch (error) {
+      if (currentPortalSessionId !== sessionId) return;
+      portalThread.render(null, false);
+      portalThread.setError(error instanceof Error ? error.message : 'Could not open this conversation.');
+    }
+  }
+
+  const portalThread = createPortalThread({
+    onSend: async (text) => {
+      if (currentPortalSessionId === null || portalClient === null) return;
+      await portalClient.sendMessage(currentPortalSessionId, text);
+    },
+  });
+  let portalConversationActive = false;
 
   const backButton = el('button', {
     attrs: {
@@ -2015,6 +2157,15 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
       // showing behind it.
       unavailable.node,
       surfaceHost,
+      // Mounted only for `userRole: 'admin'` — every other widget instance
+      // (every existing customer-facing embed included) never puts this
+      // node in the DOM at all, rather than mounting-but-hiding it. Reusing
+      // `.dh-input`/`.dh-composer`/`.dh-msg` etc. for visual consistency
+      // (see portal-thread.ts's header) is only safe while there is exactly
+      // one element wearing each of those classes at a time; an ALWAYS-
+      // mounted second one is exactly what broke `widget-dom.test.ts`'s
+      // `querySelector('.dh-input')` during development of this feature.
+      ...(isPortalAdmin ? [portalThread.node] : []),
       messageList.log,
       // Above the chips and below the transcript: the greeting is the first
       // thing said, and the chips are the answers to it.
@@ -3227,7 +3378,15 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
     const state = store.getState();
     const ctaSub = remote.header.ctaSubtitle || config.header.ctaSubtitle || 'We usually reply instantly';
     homeScreen.update(mostRecentSession(state.pastSessions), ctaSub, entry);
-    messagesScreen.render(state.pastSessions, state.session?.id ?? null);
+    // Portal (admin) mode: the Customers tab's real rows come from
+    // `/agent/queue`, not from this identity's own `pastSessions` (which for
+    // an admin is an empty, irrelevant list — see the comment above
+    // `isPortalAdmin`). Prepended, not swapped: `state.pastSessions` is left
+    // exactly as before for every other `userRole`.
+    const sessions = isPortalAdmin
+      ? [...portalQueueRows.map(portalQueueRowToSummary), ...state.pastSessions]
+      : state.pastSessions;
+    messagesScreen.render(sessions, currentPortalSessionId ?? state.session?.id ?? null);
   }
 
   /** Puts the conversation back on screen. Idempotent. */
@@ -3722,7 +3881,7 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
     // gate, a CSAT survey, the new-conversation composer) is standing in for
     // them — the same "one at a time" rule `openSurface` always enforced,
     // now with a screen layered on top of it.
-    const showingLog = onConversation && activeSurface === null;
+    const showingLog = onConversation && activeSurface === null && !portalConversationActive;
 
     // A CLOSED/RESOLVED session with no surface standing in for it — the
     // CSAT survey already submitted, or never due — still leaves `showingLog`
@@ -3748,7 +3907,11 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
 
     setPaneVisible(homeScreen.node, onHome);
     setPaneVisible(messagesScreen.node, onMessages);
-    setPaneVisible(surfaceHost, onConversation && activeSurface !== null);
+    setPaneVisible(surfaceHost, onConversation && activeSurface !== null && !portalConversationActive);
+    // The portal thread stands in for the transcript+composer exactly the
+    // way `surfaceHost` stands in for them elsewhere — one at a time, never
+    // stacked. See `openPortalConversation`/`portalConversationActive`.
+    setPaneVisible(portalThread.node, onConversation && portalConversationActive);
     setPaneVisible(messageList.log, showingLog);
     composer.node.hidden = !showingLog || showingEndedFooter;
     endedFooter.node.hidden = !showingEndedFooter;
@@ -4426,6 +4589,18 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
   // session's transcript on screen.
   const connecting = store.client.connect();
 
+  // Portal (admin) mode: the Customers tab needs its first real data before
+  // the admin ever opens Messages, not only once they navigate there — see
+  // the `isPortalAdmin` comment above `refreshPortalQueue`. `20_000`, not
+  // shorter: this is a plain REST poll (no server-pushed queue event this
+  // SDK slice surfaces yet — see `portal-staff-client.ts`), and a customer's
+  // own widget polls its session list on no tighter a cadence than a screen
+  // navigation already provides.
+  if (isPortalAdmin) {
+    refreshPortalQueue();
+    portalQueuePollTimer = setInterval(refreshPortalQueue, 20_000);
+  }
+
   const namedSession = config.sessionId;
   if (namedSession === undefined) {
     connecting.catch(report);
@@ -4486,6 +4661,11 @@ export function createWidget(rawConfig: WidgetConfig): ChatWidget {
       // Its scroll IntersectionObserver, and the marker it inserted into
       // `.dh-home` — both would otherwise outlive the shadow root.
       heroHeader.destroy();
+      // The portal (admin) socket, if this widget ever opened one — a second
+      // connection `store.destroy` below knows nothing about.
+      if (portalQueuePollTimer !== null) clearInterval(portalQueuePollTimer);
+      portalUnsubscribe?.();
+      portalClient?.disconnect();
       // `disconnect: true` — this store built the client it wraps, so nothing
       // else on the page is using that socket.
       store.destroy({ disconnect: true });
